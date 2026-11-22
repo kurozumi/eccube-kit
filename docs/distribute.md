@@ -105,7 +105,8 @@ docker compose up -d --force-recreate
   署名は新しい名前で付き、古い `self-update.sh` は古い名前（`--repo kurozumi/eccube-docker`）で確かめるため。止まったら
   `.env` に `ECCUBE_DOCKER_REPO=kurozumi/eccube-kit` を 1 行足してから打ち直す。一度新しい版になれば要らない
   （新しい `self-update.sh` は、古い名前が書いてあっても新しい名前で確かめる）。
-- 紹介サイトは `https://kurozumi.github.io/eccube-kit/`。古い URL は新しい URL へ転送する。
+- 紹介サイトは `https://eccube-kit.a-zumi.net/`（2026-11 に GitHub Pages から移した）。`kurozumi.github.io/eccube-kit/` は
+  同じ名前のページへ転送する。
 - **古い名前で新しいリポジトリを作らない。** 作った時点で GitHub の転送が切れ、古い `self-update.sh` が見に行く先が変わる。
 
 ### 配布元を変える
@@ -172,9 +173,16 @@ Symfony Cache と両立しないバージョンがあり、間違えると起動
 
 ### 紹介ページ
 
-`site/index.html` を GitHub Pages に配る（`.github/workflows/pages.yml`）。**Release を出したときに
-自動で更新される**（手動実行も可）。ページ内の `__TAG__` / `__VER__` は配る直前に最新 Release の
-番号で置き換わるので、版を書き換えて回る必要は無い。`site/` は配布物から外してある。
+`site/` を Cloudflare Workers の静的アセットとして `https://eccube-kit.a-zumi.net/` に配る
+（`.github/workflows/pages.yml`、設定は `wrangler.jsonc`）。**Release を出したときに自動で更新される**
+（手動実行も可）。ページ内の `__TAG__` / `__VER__` は配る直前に最新 Release の番号で置き換わるので、
+版を書き換えて回る必要は無い。**手元から `wrangler deploy` しない**（置き換え前のまま出る）。
+`site/` と `wrangler.jsonc` は配布物から外してある。ヘッダは `site/_headers`。
+
+- Secrets に `CLOUDFLARE_API_TOKEN`（テンプレート「Edit Cloudflare Workers」を a-zumi.net のゾーンに絞る）と
+  `CLOUDFLARE_ACCOUNT_ID` が要る。
+- **古い URL（GitHub Pages）は転送だけに残す。** 配り済みの `docs/handbook.md` がそこを指している。同じ workflow が、
+  `site/*.html` と同じ名前の転送ページ（`#` 以下も引き継ぐ）を GitHub Pages に配る。ページを足せば転送も増える。
 
 ### リリースの添付と、self-update の検証
 

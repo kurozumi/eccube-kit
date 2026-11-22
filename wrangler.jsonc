@@ -1,0 +1,25 @@
+// 紹介サイト（site/）を Cloudflare Workers の静的アセットとして配る設定。
+// Worker のスクリプトは無い（ファイルを返すだけ）。配るのは .github/workflows/pages.yml。
+//
+// **手元から `wrangler deploy` しない。** site/*.html の __TAG__ / __VER__ は workflow が
+// 配る直前に最新リリースの番号へ置き換える。手で配ると置き換え前のまま公開される。
+//
+// eccube-kit.a-zumi.net は Custom Domain（DNS のレコードと証明書は Cloudflare が作る）。
+// a-zumi.net のゾーンが、トークンと同じ Cloudflare アカウントにあることが前提。
+// このファイルは .gitattributes で配布物から外してある（店には要らない）。
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "eccube-kit-site",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./site",
+    // /guide で guide.html を返し、/guide.html は /guide へ寄せる
+    "html_handling": "auto-trailing-slash"
+  },
+  "routes": [
+    { "pattern": "eccube-kit.a-zumi.net", "custom_domain": true }
+  ],
+  // 公開先は独自ドメインだけ。*.workers.dev とプレビューの URL に同じ中身を出さない
+  "workers_dev": false,
+  "preview_urls": false
+}

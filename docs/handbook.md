@@ -54,7 +54,7 @@ PHP の脆弱性の案内が来た ──────────────▶
 自分で直したところを出したい ──────────▶ いつもの bin/deploy.sh（毎日やること）
 ```
 
-図で見たいときは [紹介ページの「やりたいことから選ぶ」](https://kurozumi.github.io/eccube-kit/guide.html#howto)。
+図で見たいときは [紹介ページの「やりたいことから選ぶ」](https://eccube-kit.a-zumi.net/guide#howto)。
 
 ---
 
