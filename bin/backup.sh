@@ -130,6 +130,13 @@ docker volume inspect "${proj}_eccube_upload" >/dev/null 2>&1 \
     || { echo "[backup] エラー: 画像のボリューム ${proj}_eccube_upload がありません（プロジェクト名が違う？ .env の COMPOSE_PROJECT_NAME）" >&2; exit 1; }
 vol eccube_upload /upload tar -C / -czf - upload > "${dest}/upload.tar.gz"
 
+# プラグインが置いたファイル（app/PluginData）。本体のボリュームの中にしか無く、git にも無い。
+# 設定ファイルやプラグインの画面から上げたファイルが入る。中身があるときだけ取る（本体は .gitkeep だけを置く）
+if [ -n "$(vol eccube_app /app sh -c 'find /app/app/PluginData -type f ! -name .gitkeep 2>/dev/null | head -1')" ]; then
+    echo "[backup] プラグインが置いたファイル（app/PluginData）を退避しています..."
+    vol eccube_app /app tar -C /app/app -czf - PluginData > "${dest}/plugindata.tar.gz"
+fi
+
 # 管理画面がディスクに書いたものを退避する。
 #
 # 本体の管理画面は DB だけでなくファイルも書く:
@@ -210,6 +217,7 @@ fi
 # 中身の妥当性を軽く確認（空ダンプ・壊れた tar を検知）
 gzip -t "${dest}/db.sql.gz"
 gzip -t "${dest}/upload.tar.gz"
+if [ -f "${dest}/plugindata.tar.gz" ]; then gzip -t "${dest}/plugindata.tar.gz"; fi
 gzip -t "${dest}/admin-files.tar.gz"
 # ダンプが最後まで書けたか（mysqldump / pg_dump は最後に完了の行を書く）。途中で切れたものを良い世代として残さない
 gunzip -c "${dest}/db.sql.gz" | tail -c 1024 | grep -qE -- '-- (PostgreSQL database dump complete|Dump completed)' \
@@ -229,7 +237,7 @@ fi
 enc_key="$(env_get BACKUP_ENCRYPT_KEY)"
 if [ -n "$enc_key" ]; then
     echo "[backup] 暗号化しています（BACKUP_ENCRYPT_KEY）..."
-    for f in db.sql.gz upload.tar.gz admin-files.tar.gz container.env host.env host.app.env plugins.txt; do
+    for f in db.sql.gz upload.tar.gz admin-files.tar.gz plugindata.tar.gz container.env host.env host.app.env plugins.txt; do
         [ -f "${dest}/${f}" ] || continue
         BACKUP_ENCRYPT_KEY="$enc_key" openssl enc -aes-256-cbc -md sha256 -pbkdf2 -iter 600000 -salt \
             -pass env:BACKUP_ENCRYPT_KEY -in "${dest}/${f}" -out "${dest}/${f}.enc" \
