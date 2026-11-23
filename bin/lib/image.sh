@@ -217,7 +217,8 @@ _image_php_recommendable() { # _image_php_recommendable <候補> <いまの PHP>
 #   同じ系列に、**それ自体はまだ知らせる時期に入っていない**新しい PHP がある → 系列の既定（無理なら、その中で
 #     いちばん新しいもの）へ --php で。期限間近の版へ移しても、すぐまた同じ注意が出るので勧めない（4.2 の 8.1 → 8.2）
 #   無い（4.2 の 8.2、4.3 の 8.3 の終わり） → 系列を上げる
-# 版はいま動いているものを書く。**配布イメージでは、同じ系列の最新のパッチまで上がる**（タグは系列で追う）。
+# 版はいま動いているものを書く。**配布イメージでは本体の版も変わりうる**（追跡タグ 4.3-php8.2 → 4.3-php8.3 は系列の
+# 最新のパッチ、固定タグ 4.3-php8.2-v1.0.12 → 4.3-php8.3-v1.0.12 はそのリリースの時点の版）。
 image_php_eol_notice() { # image_php_eol_notice <PHP> <EC-CUBE のバージョン（空可）> [今日 YYYY-MM-DD]
     local php="$1" ver="$2" today="${3:-$(date +%F)}" series eol from v best="" def ok
     eol="$(image_php_eol "$php")"
@@ -236,7 +237,7 @@ image_php_eol_notice() { # image_php_eol_notice <PHP> <EC-CUBE のバージョ�
     def="$(image_php_for_series "$series")"
     if [ -n "$best" ] && _image_php_recommendable "$def" "$php" "$today"; then best="$def"; fi
     if [ -n "$best" ]; then
-        echo "EC-CUBE ${series} 系のまま PHP ${best} に上げられます: bin/upgrade.sh ${ver} --php=${best}（本番は --prod も付ける。配布イメージなら ${series} 系の最新のパッチになる）"
+        echo "EC-CUBE ${series} 系のまま PHP ${best} に上げられます: bin/upgrade.sh ${ver} --php=${best}（本番は --prod も付ける。配布イメージでは本体の版も変わりうるので、upgrade.sh が出す版を確かめる）"
     elif [ -n "$series" ]; then
         echo "EC-CUBE ${series} 系には、これより長くサポートされる PHP がありません。EC-CUBE を新しい系列へ上げてください。"
     fi
