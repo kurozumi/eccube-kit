@@ -59,3 +59,6 @@
 # dtb_page の行と対で動くもので、DB だけ持って引っ越すと**行はあるのに twig が
 # 無くてそのページが 500 になる**。backup にも入れる（bin/backup.sh）。
 
+
+# 紹介サイトを wrangler dev で見たときの作業場所
+.wrangler/

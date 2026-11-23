@@ -1,18 +1,23 @@
-# 紹介ページ（site/）を GitHub Pages に配る。
+# 紹介ページ（site/）を Cloudflare Workers（https://eccube-kit.a-zumi.net/ ）に配る。
+# 設定はリポジトリ直下の wrangler.jsonc。
 #
 # 動くのは **Release を出したとき**と手動実行だけ。紹介ページは最新リリースを指すもので、
 # main への push で動かすと、まだ出していない版の番号がページに載る。
 #
-# site/ は .gitattributes で配布物（tag の tarball）から外してある。利用者に要らない。
+# site/ と wrangler.jsonc は .gitattributes で配布物（tag の tarball）から外してある。利用者に要らない。
 #
 # __TAG__ / __VER__ は配る直前に置き換える。JS で API を叩かせない（静的なまま）。
 #   __TAG__ … v1.0.0
 #   __VER__ … 1.0.0（tarball の展開先ディレクトリ名に使う）
-# **github-pages 環境の deployment branch policy に `v*`（tag）が要る。** release で動く
-# 実行の ref は `refs/tags/vX.Y.Z` で、環境の既定は `main` しか許さない。無いと
+#
+# **要る Secrets:** CLOUDFLARE_API_TOKEN（テンプレート「Edit Cloudflare Workers」を a-zumi.net の
+# ゾーンだけに絞ったもの）と CLOUDFLARE_ACCOUNT_ID。
+#
+# **GitHub Pages（kurozumi.github.io/eccube-kit/）は転送だけに残す。** 配り済みの docs/handbook.md と
+# 外のリンクがそこを指している。各ページを同じ名前の新しい URL へ送る（#以下も引き継ぐ）。
+# github-pages 環境の deployment branch policy に `v*`（tag）が要るのは前と同じ。無いと
 # 「Tag "v1.0.2" is not allowed to deploy to github-pages due to environment protection
 # rules」でステップが 1 つも走らずに落ちる（v1.0.2 で実際に落ちた）。設定は
-# Settings → Environments → github-pages → Deployment branches and tags、または
 #   gh api -X POST repos/<owner>/<repo>/environments/github-pages/deployment-branch-policies -f name='v*' -f type=tag
 name: pages
 
@@ -23,19 +28,20 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
   cancel-in-progress: true
 
+env:
+  SITE_URL: https://eccube-kit.a-zumi.net
+
 jobs:
-  deploy:
+  cloudflare:
     runs-on: ubuntu-latest
     environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      name: cloudflare
+      url: ${{ env.SITE_URL }}/
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -56,9 +62,69 @@ jobs:
           echo "tag=${tag} ver=${ver}"
           grep -l '__TAG__\|__VER__' site/*.html && { echo "置き換え漏れ" >&2; exit 1; } || true
 
+      - uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0 # v4.1.3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4.158.0'
+          command: deploy
+
+      - name: 届いたか確かめる
+        run: |
+          set -eu
+          # Custom Domain の初回は証明書の発行を待つことがある
+          for i in $(seq 1 30); do
+            if curl -fsS "${SITE_URL}/" -o /tmp/index.html; then break; fi
+            sleep 10
+          done
+          grep -q '__TAG__\|__VER__' /tmp/index.html && { echo "置き換え前のページが出ている" >&2; exit 1; } || true
+          curl -fsS -o /dev/null "${SITE_URL}/guide"
+          echo "OK: ${SITE_URL}/"
+
+  # 古い URL（GitHub Pages）を新しい URL へ送るだけのページを配る
+  github-pages-redirect:
+    runs-on: ubuntu-latest
+    needs: cloudflare
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 転送のページを作る
+        run: |
+          set -eu
+          mkdir -p _redirect
+          for f in site/*.html; do
+            name="$(basename "$f" .html)"
+            if [ "$name" = index ]; then path=/; else path="/${name}"; fi
+            dest="${SITE_URL}${path}"
+            cat > "_redirect/${name}.html" <<EOF
+          <!doctype html>
+          <html lang="ja">
+          <head>
+          <meta charset="utf-8">
+          <meta name="robots" content="noindex">
+          <link rel="canonical" href="${dest}">
+          <meta http-equiv="refresh" content="0; url=${dest}">
+          <title>EC-CUBE 運用キット（移転しました）</title>
+          <script>location.replace("${dest}" + location.hash);</script>
+          </head>
+          <body>
+          <p>紹介ページは <a href="${dest}">${dest}</a> に移りました。</p>
+          </body>
+          </html>
+          EOF
+          done
+          ls _redirect
+
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: site
+          path: _redirect
       - id: deploy
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
