@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>商品画像を S3 / R2 から配る | EC-CUBE 運用キット</title>
+<meta name="description" content="EC-CUBE 4 の商品画像を、本体を改造せずに Amazon S3 や Cloudflare R2 から配る手順。S3 だけに置けない理由と、書き込みは手元・配信はオブジェクトストレージにする構成。">
+<meta property="og:title" content="EC-CUBE 運用キット — 商品画像を S3 / R2 から配る">
+<meta property="og:description" content="EC-CUBE 本体を改造せずに、商品画像をオブジェクトストレージと CDN から配る手順。4.2・4.3・4.4 で確かめた設定と、S3 だけに置けない理由。">
+<meta property="og:type" content="website">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#E8621C">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@500;700;900&family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topnav"><div class="wrap"><a class="brand" href="./"><img src="favicon.svg" alt="">EC-CUBE 運用キット</a><nav aria-label="ページ"><a href="./">トップ</a><a href="guide.html">はじめる・上げる</a><a href="ops.html">更新と反映</a><a href="scale.html">大規模アクセス</a><a href="https://github.com/kurozumi/eccube-kit">GitHub</a></nav></div></div>
+
+<header class="pagehead">
+  <div class="wrap">
+    <p class="eyebrow">eccube-docker · __TAG__ · <a href="scale.html">大規模アクセス</a></p>
+    <h1>商品画像を S3 / R2 から配る</h1>
+    <p class="lede">EC-CUBE 本体を改造せずに、商品画像を Amazon S3 や Cloudflare R2 から配れます。ただし、本体が画像を書き込む先は手元のディスクのまま残します。その理由と手順です。</p>
+  </div>
+</header>
+
+<section id="answer">
+  <div class="wrap">
+    <h2>できること、<em class="k">やらないこと</em></h2>
+    <p class="sub">大規模なサイトで画像に求められるのは、アプリのサーバーが画像を配らないこと、複数のサーバーで同じ画像が見えること、画像を失わないことの 3 つです。S3 はその手段の 1 つで、手間の少ない順に 3 通りあります。</p>
+
+    <div class="tablewrap">
+      <table class="stack">
+        <tr><th>構成</th><th>画像を配るのは</th><th>手間</th></tr>
+        <tr><td><strong>NFS / EFS ＋ 前段の CDN</strong></td><td data-label="画像を配るのは">CDN（初回だけアプリのサーバー）</td><td data-label="手間">いまでもできる。設定だけ（<a href="scale.html">大規模アクセス</a>）</td></tr>
+        <tr><td><strong>書き込みは手元、配信は S3 / R2</strong></td><td data-label="画像を配るのは">S3 / R2 と CDN だけ</td><td data-label="手間"><strong>このページの手順。</strong>設定ファイル 1 つと、写す仕組み</td></tr>
+        <tr><td>S3 / R2 だけに置く</td><td data-label="画像を配るのは">S3 / R2 と CDN だけ</td><td data-label="手間"><strong>やらない。</strong>本体の管理画面を 3 系列分書き換えることになる（下）</td></tr>
+      </table>
+    </div>
+
+    <div class="note">
+      <b>どれを選ぶか</b>
+      <span>画像の配信で困るのは、CDN を通さずにアプリのサーバーが画像を配っているときです。まず CDN を前に置き、それでもサーバーを並べる段になったら、NFS / EFS を用意するか、このページの構成にするかを選びます。このページの構成なら、管理画面を 1 台に決めておけば NFS / EFS は要りません（ほかのサーバーは画像を読まないため）。</span>
+    </div>
+  </div>
+</section>
+
+<section id="why">
+  <div class="wrap">
+    <h2>S3 だけに<em class="k">置けない</em>理由</h2>
+    <p class="sub">EC-CUBE の管理画面は、画像を手元のディスクに直接書き、直接確かめます。4.2・4.3・4.4 のソースで、どれも同じ作りでした。</p>
+
+    <div class="two">
+      <div class="box no"><h3>本体が手元のディスクを前提にしているところ</h3><ul>
+        <li><strong>商品画像の登録:</strong> アップロードされた画像をいったん <code>html/upload/temp_image</code> に置き、商品を保存したときに <code>save_image</code> へ移します（<code>ProductController</code>）。</li>
+        <li><strong>画像の削除:</strong> 消す画像が手元のディスクに実在するかを <code>realpath()</code> で確かめます（<code>ProductType</code>）。S3 にしか無いと、画像を消すたびに入力エラーになります。</li>
+        <li><strong>商品のコピー・CSV での一括登録・支払方法の画像</strong>も、手元のファイルを直接コピー・削除します。</li>
+      </ul></div>
+      <div class="box"><h3>表示する側は差し替えられる</h3><ul>
+        <li>画像の URL は、テンプレートの <code>asset(…, 'save_image')</code> が決めています。中身は Symfony の設定 1 つで、<strong>本体を改造せずに CDN の URL へ向けられます。</strong></li>
+        <li>管理画面のプレビュー用の <code>temp_image</code> は、そのまま手元を指します。</li>
+        <li>S3 だけに置くには、上の処理を持つコントローラを写して書き換えることになります。写したものは、本体を上げたときに古いほうが勝ち続けるので、このキットではやりません。</li>
+      </ul></div>
+    </div>
+  </div>
+</section>
+
+<section id="howto">
+  <div class="wrap">
+    <h2>書き込みは手元、<em class="k">配信は S3 / R2</em></h2>
+    <p class="sub">管理画面が手元に書いた画像を、1 分おきにバケットへ写し、お客さんには CDN の URL で見せます。<strong>順番が大事です。</strong>先に写してから URL を切り替えます（逆にすると、写し終わるまで画像が出ません）。</p>
+
+    <div class="steps">
+      <div class="step"><div class="num">1</div><h3>置き場を作る</h3><pre><span class="c"># Cloudflare R2 の例</span>
+バケット: shop-images
+公開: カスタムドメイン
+  img.example.com
+<span class="c"># 書き込み用の鍵（このバケットだけ）</span></pre><p>R2 なら、バケットにカスタムドメインを付けるだけで Cloudflare の CDN から配られ、配信の転送量もかかりません。S3 なら、バケットの前に CloudFront を置きます。鍵は<strong>このバケットへの書き込みだけ</strong>に絞ります。</p></div>
+
+      <div class="step"><div class="num">2</div><h3>鍵をリポジトリの外に置く</h3><pre><span class="c"># /etc/eccube/rclone.env（chmod 600）</span>
+RCLONE_CONFIG_IMG_TYPE=s3
+RCLONE_CONFIG_IMG_PROVIDER=Cloudflare
+RCLONE_CONFIG_IMG_ACCESS_KEY_ID=…
+RCLONE_CONFIG_IMG_SECRET_ACCESS_KEY=…
+RCLONE_CONFIG_IMG_ENDPOINT=https://&lt;アカウント ID&gt;.r2.cloudflarestorage.com
+RCLONE_CONFIG_IMG_REGION=auto
+RCLONE_CONFIG_IMG_NO_CHECK_BUCKET=true</pre><p>写すのは rclone で、設定は環境変数で渡します。<strong>店のリポジトリの中には置きません</strong>（<code>.env.rclone</code> のような名前は git に入ってしまいます）。<code>NO_CHECK_BUCKET</code> は、鍵をバケットだけに絞ったときに要ります（無いと、バケットを作ろうとして権限で止まります）。S3 なら <code>PROVIDER=AWS</code>、<code>REGION=ap-northeast-1</code> にして、<code>ENDPOINT</code> の行を消します。</p></div>
+
+      <div class="step"><div class="num">3</div><h3>写すスクリプトを置く</h3><pre><span class="c"># /usr/local/bin/eccube-img-sync（chmod 755）</span>
+#!/bin/sh
+exec docker run --rm \
+  --env-file /etc/eccube/rclone.env \
+  -v &lt;プロジェクト名&gt;_eccube_upload:/upload:ro \
+  rclone/rclone:1.76.0 \
+  copy /upload/save_image \
+  img:shop-images/save_image</pre><p>商品画像は <code>eccube_upload</code> ボリュームの <code>save_image</code> にあります。<code>&lt;プロジェクト名&gt;</code> は <code>docker volume ls | grep eccube_upload</code> で確かめます。ボリュームは読み取り専用で渡すので、手元の画像には触りません。<strong>一度手で打って、いまの画像を全部写しておきます。</strong></p></div>
+
+      <div class="step"><div class="num">4</div><h3>写し続ける</h3><pre><span class="c"># crontab -e（管理画面を動かすサーバーで。1 行で書く）</span>
+* * * * * flock -n /tmp/img-sync.lock /usr/local/bin/eccube-img-sync</pre><p>1 分おきに、まだ写していない画像だけを送ります（送り済みのものは比べるだけ）。<code>flock</code> は、前の回が終わる前に次の回が重ならないようにするためです。<strong><code>sync</code> ではなく <code>copy</code> を使います</strong>（理由は下）。</p></div>
+
+      <div class="step"><div class="num">5</div><h3>URL を切り替える</h3><pre><span class="c"># app/config/eccube/packages/image_cdn.yaml</span>
+framework:
+  assets:
+    packages:
+      save_image:
+        base_path: ~
+        base_urls:
+          - 'https://img.example.com/save_image'</pre><p><code>base_path: ~</code> を省くと起動しません（本体が持っている値と両方になり、「An asset package cannot have base URLs and base paths」で止まります）。コミットして <code>bin/deploy.sh</code> で反映します。<strong>手順 3 で今の画像を写し終えてから。</strong></p></div>
+
+      <div class="step"><div class="num">6</div><h3>確かめる</h3><pre><span class="c"># 商品ページの画像の URL が CDN になっているか</span>
+curl -s https://店/products/detail/1 \
+  | grep -o 'https://img[^"]*' | head -3
+<span class="c"># その画像が返るか</span>
+curl -sI https://img.example.com/save_image/…</pre><p>商品を 1 つ登録し直し、1〜2 分のうちに新しい画像も出ることを見ます。管理画面の画像のプレビューは手元を見るので、切り替えの前後で変わりません。</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="caveats">
+  <div class="wrap">
+    <h2>気をつける<em class="k">こと</em></h2>
+
+    <div class="two">
+      <div class="box"><h4>消した画像はバケットに残る</h4><ul>
+        <li><code>copy</code> は送るだけで、バケットから消しません。管理画面で消した画像も、バケットには残ります。</li>
+        <li><code>sync</code> にすると、手元にないものをバケットからも消します。手元のボリュームを作り直した・別のサーバーで動かした、といったときに、<strong>バケットの画像がまとめて消えます。</strong>残っている画像は URL を知らない限り誰も見ないので、置き場の料金が少し増えるだけです。</li>
+      </ul></div>
+      <div class="box"><h4>登録した直後は画像が出ないことがある</h4><ul>
+        <li>写すのは 1 分おきなので、商品を保存してから次の回までは、お客さんの画面で画像が出ません。</li>
+        <li>その間に誰かが開くと、CDN が「無い」という返事をしばらく覚えることがあります（Cloudflare の既定では数分）。急ぐときは、その URL のキャッシュを CDN の画面で消します。</li>
+      </ul></div>
+      <div class="box"><h4>手元の画像が正、バックアップも今までどおり</h4><ul>
+        <li>バケットは配るための写しです。<code>bin/backup.sh</code> はこれまでどおり手元の画像を取ります。</li>
+        <li><code>asset()</code> を通さずに画像のパスを直接書いているプラグインやテンプレートは、手元の URL のままです（4.4 の本体にも 1 か所あります）。手元にも画像は残っているので、出なくなることはありません。</li>
+      </ul></div>
+      <div class="box"><h4>サーバーを並べるとき</h4><ul>
+        <li>管理画面を開くサーバーを 1 台に決め、cron もその 1 台だけで回します。ほかのサーバーは画像を読まないので、NFS / EFS は要りません。</li>
+        <li>管理画面を複数のサーバーで開くなら、画像の置き場は NFS / EFS にして、cron はどれか 1 台で回します。</li>
+      </ul></div>
+    </div>
+
+    <div class="two" style="margin-top:28px">
+      <div class="box"><h3>元に戻すとき</h3><ul>
+        <li><code>app/config/eccube/packages/image_cdn.yaml</code> を消してコミットし、<code>bin/deploy.sh</code>。URL が手元に戻ります。</li>
+        <li>手元の画像は一度も消していないので、戻してもそのまま出ます。cron は止めてから、バケットを片付けます。</li>
+      </ul></div>
+    </div>
+
+    <div class="note">
+      <b>正直に</b>
+      <span>確かめたのは 2 つです。URL を切り替える設定は、4.2・4.3・4.4 の配布イメージで、商品画像の URL が CDN になり、プレビュー用の <code>temp_image</code> とほかのファイルは手元のままになることを見ました。写す手順は、手元の実物の <code>eccube_upload</code> ボリュームから、S3 互換のテスト用サーバーへ写せることを見ました。<strong>本物の R2・S3・CloudFront と、本番で長く回したときの動きはまだ確かめていません。</strong>キットの機能としてはまだ入っていないので、試したら結果を Issue で教えてください。</span>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <h2>ほかのページ</h2>
+    <div class="nextpages"><a class="nextpage" href="scale.html"><span class="tag">大規模アクセス</span><h3>アクセスが増えたら、<em class="k">測ってから</em></h3><p>負荷試験、CDN、Redis、php-fpm の枠、複数サーバーとロードバランサー、DB。</p></a><a class="nextpage" href="ops.html"><span class="tag">更新と反映</span><h3>パッチを<em class="k">その日のうちに</em></h3><p>あなたのものと EC-CUBE を別々に更新する仕組み、失敗したら元に戻る仕組み、本番にはレビュー済みの main しか出ない 3 枚の壁。</p></a></div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>Apache License 2.0。EC-CUBE は対象外で、EC-CUBE 自身のライセンスがそのまま適用されます（EC-CUBE は一切改変していません）。</p>
+    <p><a href="https://github.com/kurozumi/eccube-kit/releases">リリース</a> · <a href="https://github.com/kurozumi/eccube-kit/issues">Issue</a> · <a href="https://github.com/kurozumi/eccube-kit/blob/main/LICENSE">LICENSE</a> · <a href="https://github.com/kurozumi/eccube-kit/security/policy">脆弱性の報告（非公開）</a></p>
+    <p>作った人: Akira Kurozumi（<a href="https://a-zumi.net/">a-zumi.net</a>）· <a href="./#contact">お問い合わせ</a></p>
+    <p>この環境は非公式です。EC-CUBE は株式会社イーシーキューブの登録商標で、同社とは無関係です。</p>
+  </div>
+</footer>
+
+<div class="fab" id="fab" hidden>
+  <div class="fab-menu" id="fab-menu" role="dialog" aria-label="お問い合わせ / Issue">
+    <div class="head">困ったこと、こう動いてほしい<small>どちらも歓迎です。うまく書けなくて構いません。</small></div>
+    <a class="fab-item" href="https://github.com/kurozumi/eccube-kit/issues/new" target="_blank" rel="noopener">
+      <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg></span>
+      <span><b>Issue を書く</b><span>不具合・要望・質問。GitHub で公開の相談</span></span>
+    </a>
+    <a class="fab-item" href="mailto:info@a-zumi.net?subject=eccube-docker%20%E3%81%AE%E7%9B%B8%E8%AB%87">
+      <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></span>
+      <span><b>メールで相談する</b><span>公開できない話、受託の構築・引っ越し</span></span>
+    </a>
+  </div>
+  <button class="fab-btn" id="fab-btn" type="button" aria-expanded="false" aria-controls="fab-menu">
+    <svg class="chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H8l-5 3 1.2-4.2A8 8 0 1 1 21 12z"/></svg>
+    <svg class="x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    <span>お問い合わせ / Issue</span>
+  </button>
+</div>
+<script>
+(function () {
+  var fab = document.getElementById('fab');
+  var btn = document.getElementById('fab-btn');
+  var contact = document.getElementById('contact');
+  if (!fab || !btn) return;
+  fab.hidden = false;
+  var menu = document.getElementById('fab-menu');
+  // 閉じている間はメニューの中に Tab で入れないようにする（見えないリンクにフォーカスが行かない）
+  if (menu) menu.inert = true;
+  function setOpen(v) {
+    if (!v && menu && menu.contains(document.activeElement)) btn.focus();
+    fab.classList.toggle('open', v);
+    btn.setAttribute('aria-expanded', v ? 'true' : 'false');
+    if (menu) menu.inert = !v;
+  }
+  btn.addEventListener('click', function () { setOpen(!fab.classList.contains('open')); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') setOpen(false); });
+  document.addEventListener('click', function (e) { if (!fab.contains(e.target)) setOpen(false); });
+  // 連絡先の節が見えている間は出さない（同じものが二重に見えないように）
+  if (contact && 'IntersectionObserver' in window) {
+    new IntersectionObserver(function (es) {
+      var seen = es[0].isIntersecting;
+      fab.hidden = seen;
+      if (seen) setOpen(false);
+    }, { threshold: 0.15 }).observe(contact);
+  }
+})();
+</script>
+</body>
+</html>

@@ -69,7 +69,7 @@
         <div class="lname"><span class="lstep">5</span>DB・画像<small>MariaDB / PostgreSQL</small></div>
         <ul>
           <li><strong>DB の設定は EC-CUBE 向けに調整済み</strong>（メモリの使い方、接続数）。マネージド DB へは <code>bin/setup.sh db</code> で移せます。<span class="ltag">スイッチ 1 つ</span></li>
-          <li><strong>商品画像はアプリと別の置き場</strong>にあり、NFS / EFS へ差し替えれば全サーバーで共有できます。</li>
+          <li><strong>商品画像はアプリと別の置き場</strong>にあり、NFS / EFS へ差し替えれば全サーバーで共有できます。S3 / R2 から配ることもできます（<a href="images.html">商品画像を S3 / R2 から配る</a>）。</li>
         </ul>
       </li>
       <li class="layer wide">
@@ -217,7 +217,7 @@ SET GLOBAL slow_query_log = 1;
         <tr><th>置くもの</th><th>どこに</th></tr>
         <tr><td>DB</td><td>マネージド DB か別のサーバー（全台が同じものを見る）</td></tr>
         <tr><td>Redis 2 つ</td><td>キャッシュ用とログイン用を別々に</td></tr>
-        <tr><td>商品画像</td><td>NFS / EFS（サーバーごとに別の画像にならないように）</td></tr>
+        <tr><td>商品画像</td><td>NFS / EFS（サーバーごとに別の画像にならないように）。管理画面を 1 台に決めるなら、<a href="images.html">S3 / R2 から配る</a>構成にして共有をなくせる</td></tr>
         <tr><td>アプリ</td><td>各サーバーで <code>compose.app.yaml</code>。1 台だけが DB の構造を変える役（init 役）</td></tr>
         <tr><td>前の振り分け（LB）</td><td>自前の nginx・Cloudflare Load Balancing・AWS ALB。HTTPS はここで終える</td></tr>
       </table>
@@ -261,7 +261,7 @@ docker/nginx/lb.conf.example</pre><p>各サーバーの <code>:8080</code> へ�
 <section class="band">
   <div class="wrap">
     <h2>ほかのページ</h2>
-    <div class="nextpages"><a class="nextpage" href="guide.html"><span class="tag">はじめる・上げる</span><h3>やりたいことから<em class="k">選ぶ</em></h3><p>新規作成・EC-CUBE のバージョンアップ・環境のアップデートを、どこで何を打つかの流れ図で。</p></a><a class="nextpage" href="ops.html"><span class="tag">更新と反映</span><h3>パッチを<em class="k">その日のうちに</em></h3><p>あなたのものと EC-CUBE を別々に更新する仕組み、失敗したら元に戻る仕組み、本番にはレビュー済みの main しか出ない 3 枚の壁。</p></a></div>
+    <div class="nextpages"><a class="nextpage" href="images.html"><span class="tag">商品画像</span><h3>S3 / R2 から<em class="k">配る</em></h3><p>本体を改造せずに、商品画像をオブジェクトストレージと CDN から配る手順と、S3 だけに置けない理由。</p></a><a class="nextpage" href="guide.html"><span class="tag">はじめる・上げる</span><h3>やりたいことから<em class="k">選ぶ</em></h3><p>新規作成・EC-CUBE のバージョンアップ・環境のアップデートを、どこで何を打つかの流れ図で。</p></a><a class="nextpage" href="ops.html"><span class="tag">更新と反映</span><h3>パッチを<em class="k">その日のうちに</em></h3><p>あなたのものと EC-CUBE を別々に更新する仕組み、失敗したら元に戻る仕組み、本番にはレビュー済みの main しか出ない 3 枚の壁。</p></a></div>
   </div>
 </section>
 
