@@ -325,7 +325,7 @@ foreach ($plugins as $code => $p) {
 }
 if ($broken_plugins) {
     $reasons[] = '上げた先で動かない見込みのプラグインが ' . count($broken_plugins) . ' 本あります（' . implode('、', $broken_plugins) . '）。対応版に入れ替えるか、直します';
-    $asks[] = implode('、', $broken_plugins) . ' はどこから来たものか（オーナーズストアで買ったものなら EC-CUBE ' . $to_ver . ' 対応版が出ているか、店や制作会社が作ったものなら直す）';
+    $asks[] = implode('、', $broken_plugins) . ' はどこから来たものか。オーナーズストアで買ったものなら、EC-CUBE ' . $to_ver . ' 対応版が出ているか（無ければ、作者に対応予定と、店の側で直してよいかを問い合わせる。**作者の許可かライセンスの裏付けなしに、買ったプラグインを直さない**）。店や制作会社が作ったものなら、直す';
 }
 if (($errors_by['Customize'] ?? 0) + ($legacy_by['Customize'] ?? 0) > 0) $reasons[] = '`app/Customize` に、上げた先で動かない見込みの書き方が ' . (($errors_by['Customize'] ?? 0) + ($legacy_by['Customize'] ?? 0)) . ' 件あります';
 $disabled = array_keys(array_filter($plugins, fn($p) => $p['enabled'] === false && $p['dir'] !== null));
