@@ -242,9 +242,14 @@ docker compose cp ec-cube:/var/www/html/html/upload/. ./upload-backup/   # 退�
 docker compose cp ./upload-backup/. ec-cube:/var/www/html/html/upload/   # 復元
 ```
 
-> オブジェクトストレージ（S3 直結）にしたい場合は、EC-CUBE 側に S3 アダプタ（プラグイン
-> またはサービス上書き）と画像配信の URL 変更が必要で、バージョン依存が大きい。まずは
-> 本体無改造で済む共有ファイルシステム（NFS/EFS）方式を推奨。
+> **S3 / R2 から配る**こともできる（本体無改造）。書き込みは手元の `save_image` のまま、cron の rclone で
+> バケットへ写し（`copy`。`sync` は手元が空のときにバケットを消す）、`framework.assets.packages.save_image` を
+> `base_path: ~` ＋ `base_urls` で CDN へ向ける（`base_path` を消さないと「An asset package cannot have base URLs and
+> base paths」で起動しない。4.2・4.3・4.4 で確かめた）。手順は紹介サイトの
+> [商品画像を S3 / R2 から配る](https://eccube-kit.a-zumi.net/images)。
+> **S3 だけに置くことはできない。** 本体の管理画面が手元のファイルを直接動かし、画像を消すときは `realpath()` で
+> 手元に実在するかを確かめる（`ProductType::validateFilePath`）。S3 だけにするには本体のコントローラを写して書き換える
+> ことになり、本体を上げたときに古いほうが勝ち続ける。
 
 # 複数ホスト + ロードバランサ
 
