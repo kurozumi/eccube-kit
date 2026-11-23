@@ -35,6 +35,12 @@ DoctrineMigrations / config / Plugin）と `html/user_data`（独自 CSS/JS）�
     `bin/upgrade.sh` の最後に `theme.sh diff` で本体側の変更を出す。
     テーマの選択は `.env` の `ECCUBE_TEMPLATE_CODE`（管理画面の選択はコンテナ内 `.env` に
     書かれ、upgrade で消える）。
+    **買ったテーマ・管理画面から入れたテーマも `original` として入れる**（`bin/theme.sh install <書庫>` /
+    `adopt <コード>`）。管理画面のアップロードは静的物を本体のボリュームの `html/template/<コード>` に書き、
+    **upgrade で消える**（ページは 200 のまま CSS と画像だけ 404）。backup も取らない。`upgrade.sh` は
+    それを使っていれば何も変えずに止まる（`bin/lib/theme.sh`）。`.base` の 1 行目が `package=` なら書庫・adopt、
+    `version=` なら本体から写したもの。書庫は使い捨てのコンテナで展開し、busybox の unzip / tar が `../` を
+    **黙って削る**（標準エラーに 1 行だけ）のをその 1 行で見て止める。
   - **本体テーマの twig / scss はホストに無い。** `bin/ide-sync.sh` が参照用の写しを
     `.ide/` に作る（twig は `src/Eccube/Resource/template/`、scss は
     `html/template/default/assets/scss/`）。**写しを編集しても反映されない。**

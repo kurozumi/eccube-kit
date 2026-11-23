@@ -138,6 +138,7 @@ bin/pull-admin-files.sh    # 本番で管理画面が書いたファイルを手
 bin/self-update.sh         # この環境自体を新しいリリースへ（--check で確認だけ）
 bin/upgrade.sh <制約> --prod  # EC-CUBE 本体を上げる（データ保持）
 bin/theme.sh init|diff     # オリジナルテーマの静的物を本体から写す・本体側の変更を見る
+bin/theme.sh install <書庫>  # 買ったテーマを入れる（adopt <コード> で管理画面から入れたものを移す）
 bin/healthcheck.sh         # 主要ページの疎通
 ```
 
