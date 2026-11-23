@@ -46,7 +46,7 @@
 <section id="steps">
   <div class="wrap">
     <h2>サーバーを<em class="k">作る</em>まで</h2>
-    <p class="sub">画面の項目名は 2026 年 11 月の日本語の管理画面のものです。名前が変わっていたら、<strong>何をしたいか</strong>で探してください。</p>
+    <p class="sub">「サーバー」の札は、サーバーに効くコマンドの印です。<code>ssh shop '…'</code> の形のものは、<strong>パソコンのターミナルで</strong>打ちます。画面の項目名は 2026 年 11 月の日本語の管理画面のものです。名前が変わっていたら、<strong>何をしたいか</strong>で探してください。</p>
 
     <div class="flow" id="account">
       <div class="flow-head">
@@ -108,13 +108,14 @@ Host shop
   IdentityFile ~/.ssh/id_ed25519</pre></li>
         <li><h4><span class="where pc">パソコン</span>入ってみる</h4>
 <pre>ssh shop</pre>
-<p>初回は「この相手で合っているか」と聞かれるので <code>yes</code>。<code>ubuntu@ip-…:~$</code> と出れば入れています。<code>exit</code> で抜けます。</p></li>
+<p>初回は「この相手で合っているか」と聞かれるので <code>yes</code>。<code>ubuntu@ip-…:~$</code> と出れば入れています。<strong><code>exit</code> で抜けて、パソコンに戻ります</strong>（このあとのコマンドはパソコンで打ちます）。</p></li>
         <li><h4><span class="where srv">サーバー</span>パスワードで入れないことを確かめる</h4>
 <pre>ssh shop 'sudo sshd -T | grep -E "^(passwordauthentication|permitrootlogin) "'</pre>
 <p><code>passwordauthentication no</code> と <code>permitrootlogin without-password</code>（または <code>no</code>）なら大丈夫です。<code>yes</code> と出たら、<a href="server-vps.html#harden">VPS のページの「SSH を固める」</a>と同じ設定を入れます。</p></li>
         <li><h4><span class="where srv">サーバー</span>OS の自動更新を確かめる</h4>
-<pre>ssh shop 'systemctl is-enabled unattended-upgrades'</pre>
-<p><code>enabled</code> なら、セキュリティ更新は毎日自動で入ります。カーネルの更新は再起動するまで効かないので、月に 1 回、お客さんの少ない時間に <code>ssh shop 'sudo reboot'</code>（お店は自動で立ち上がります）。</p></li>
+<pre>ssh shop 'apt-config dump | grep -E "APT::Periodic::(Update-Package-Lists|Unattended-Upgrade) "'
+ssh shop 'systemctl is-active apt-daily.timer apt-daily-upgrade.timer'</pre>
+<p>1 行目の 2 つがどちらも <code>"1"</code>、2 行目が <code>active</code> 2 つなら、セキュリティ更新は毎日自動で入ります。違っていたら <code>ssh -t shop 'sudo dpkg-reconfigure -plow unattended-upgrades'</code>（「はい」）と <code>ssh shop 'sudo systemctl enable --now apt-daily.timer apt-daily-upgrade.timer'</code>。カーネルの更新は再起動するまで効かないので、月に 1 回、お客さんの少ない時間に <code>ssh shop 'sudo reboot'</code>（お店は自動で立ち上がります）。</p></li>
       </ol>
     </div>
 
@@ -129,7 +130,7 @@ Host shop
         <li><h4><span class="where eye">ブラウザ</span>バケットを作る</h4>
 <p>S3 →「バケットを作成」。名前は世界で 1 つのもの（例: <code>myshop-backup-7k2p</code>）。リージョンは東京。<strong>「パブリックアクセスをすべてブロック」はオンのまま。</strong>「バケットのバージョニング」→「有効にする」（上書きされても前の版が残ります）。暗号化は既定（SSE-S3）のまま。</p></li>
         <li><h4><span class="where eye">ブラウザ</span>30 日で消える決まりを作る</h4>
-<p>作ったバケット →「管理」→「ライフサイクルルールを作成する」。範囲は「バケット内のすべてのオブジェクトに適用」。「オブジェクトの現行バージョンを有効期限切れにする」→ 30 日、「オブジェクトの非現行バージョンを完全に削除」→ 30 日。</p></li>
+<p>作ったバケット →「管理」→「ライフサイクルルールを作成する」。範囲は「バケット内のすべてのオブジェクトに適用」。「オブジェクトの現行バージョンを有効期限切れにする」→ 30 日、「オブジェクトの非現行バージョンを完全に削除」→ 30 日、<strong>「期限切れのオブジェクト削除マーカーまたは不完全なマルチパートアップロードを削除」→「不完全なマルチパートアップロードを削除」→ 7 日</strong>（大きなバックアップを送っている途中で止まると、送りかけの断片が残り、見えないまま料金がかかり続けます）。</p></li>
         <li><h4><span class="where eye">ブラウザ</span>サーバーの役割（IAM ロール）を作る</h4>
 <p>IAM →「ロール」→「ロールを作成」→「AWS のサービス」→ ユースケース「EC2」→ 許可ポリシーは何も選ばずに次へ → 名前 <code>myshop-server</code> で作成。作ったロール →「許可を追加」→「インラインポリシーを作成」→「JSON」に下を貼り、バケット名を自分のものに替えます。</p>
 <pre>{

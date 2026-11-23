@@ -44,7 +44,7 @@
 <section id="steps">
   <div class="wrap">
     <h2>サーバーを<em class="k">固める</em>まで</h2>
-    <p class="sub">VPS の会社ごとに画面は違いますが、決めることは同じです。会社の画面で見つからない項目は、その会社のマニュアルで同じ名前を探してください。</p>
+    <p class="sub">B〜E の「サーバー」の札のコマンドは、<strong>サーバーに SSH で入った状態で</strong>打ちます（<code>shop@…:~$</code> と出ている窓）。VPS の会社ごとに画面は違いますが、決めることは同じです。会社の画面で見つからない項目は、その会社のマニュアルで同じ名前を探してください。</p>
 
     <div class="flow" id="order">
       <div class="flow-head">
@@ -86,7 +86,7 @@ visudo -cf /tmp/90-shop &amp;&amp; install -m 440 /tmp/90-shop /etc/sudoers.d/90
         <li><h4><span class="where srv">サーバー</span>鍵を新しいユーザーへ写す（root に鍵を登録した場合）</h4>
 <pre>install -d -m 700 -o shop -g shop /home/shop/.ssh
 install -m 600 -o shop -g shop /root/.ssh/authorized_keys /home/shop/.ssh/authorized_keys</pre>
-<p>root にパスワードで入った場合は、代わりに<strong>パソコンから</strong> <code>ssh-copy-id shop@203.0.113.10</code>（<code>shop</code> のパスワードを聞かれます）。</p></li>
+<p>最初のユーザーが <code>ubuntu</code> だった場合は、写し元が違います: <code>sudo install -m 600 -o shop -g shop /home/ubuntu/.ssh/authorized_keys /home/shop/.ssh/authorized_keys</code>（1 行目の <code>install -d</code> にも <code>sudo</code> を付けます）。root にパスワードで入った場合は、代わりに<strong>パソコンから</strong> <code>ssh-copy-id shop@203.0.113.10</code>（<code>shop</code> のパスワードを聞かれます）。</p></li>
         <li><h4><span class="where pc">パソコン</span>呼び名を書いて、新しいユーザーで入ってみる</h4>
 <pre><span class="c"># ~/.ssh/config に足す（ファイルが無ければ作る）</span>
 Host shop
@@ -140,8 +140,9 @@ sudo ufw enable        <span class="c"># 「SSH が切れるかも」と聞か�
 sudo ufw status</pre>
 <p><code>OpenSSH ALLOW</code> の行があれば大丈夫です。<strong><code>allow OpenSSH</code> を先に打ってから <code>enable</code>。</strong>逆にすると、その場で締め出されます（VPS の管理画面の「コンソール」から入って直せます）。</p></li>
         <li><h4><span class="where srv">サーバー</span>OS の自動更新を確かめる</h4>
-<pre>systemctl is-enabled unattended-upgrades</pre>
-<p><code>enabled</code> なら、セキュリティ更新は毎日自動で入ります。出なければ <code>sudo apt-get install -y unattended-upgrades &amp;&amp; sudo dpkg-reconfigure -plow unattended-upgrades</code>（「はい」）。</p></li>
+<pre>apt-config dump | grep -E "APT::Periodic::(Update-Package-Lists|Unattended-Upgrade) "
+systemctl is-active apt-daily.timer apt-daily-upgrade.timer</pre>
+<p>1 行目の 2 つがどちらも <code>"1"</code>、2 行目が <code>active</code> 2 つなら、セキュリティ更新は毎日自動で入ります。違っていたら <code>sudo apt-get install -y unattended-upgrades &amp;&amp; sudo dpkg-reconfigure -plow unattended-upgrades</code>（「はい」）と <code>sudo systemctl enable --now apt-daily.timer apt-daily-upgrade.timer</code>。</p></li>
         <li><h4><span class="where srv">サーバー</span>月に 1 回、再起動する</h4>
 <pre>ls /var/run/reboot-required 2&gt;/dev/null &amp;&amp; sudo reboot</pre>
 <p>カーネルの更新は、再起動するまで効きません。ファイルがあれば「再起動が要る」という意味です。お客さんの少ない時間に。お店は自動で立ち上がります。</p></li>
