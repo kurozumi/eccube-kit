@@ -20,7 +20,7 @@ const FROM = '/from';
 const KIT = '/kit';
 const OUT = '/out';
 
-$mode = $argv[1] ?? 'check';
+$mode = $argv[1] ?? 'check';   // check / pack / pack-data（切り替え。データだけ）
 $theme = $argv[2] ?? '';
 
 function rel_files(string $root, string $sub = ''): array
@@ -69,10 +69,39 @@ if ($mode === 'check') {
     foreach ($stops as $s) echo "STOP={$s}\n";
     exit(0);
 }
-if ($stops) { foreach ($stops as $s) fwrite(STDERR, "$s\n"); exit(1); }
+if ($stops && $mode === 'pack') { foreach ($stops as $s) fwrite(STDERR, "$s\n"); exit(1); }
 
 $notes = [];
 
+// ---------------------------------------------------------------- 切り替え（pack-data）
+// コード（app/Customize・テーマ・プラグイン・テンプレートの写し）は、リハーサルで直してキットの git にある。
+// 運ぶのはデータだけ: DB・画像・PluginData と、DB の行と対になっているページ（app/template/user_data）。
+// 元の店の管理画面で直せるファイル（ブロック・メール・CSS）がキットのものと違えば、運ばずに挙げる
+if ($mode === 'pack-data') {
+    $stage = '/tmp/stage';
+    sh('rm -rf ' . $stage . ' && mkdir -p ' . $stage . '/app/template/user_data ' . $stage . '/html/user_data ' . $stage . '/app/Plugin');
+    foreach (rel_files(OLD, 'app/template/user_data') as $f) if (basename($f) !== '.gitkeep') put("$stage/$f", OLD . "/$f");
+    sh("tar -C $stage -czf " . OUT . '/admin-files.tar.gz app/template/user_data');
+    $differ = [];
+    foreach (['Block', 'Mail'] as $kind) {
+        foreach ([$theme !== '' ? $theme : null, 'default'] as $code) {
+            if ($code === null) continue;
+            $kit_code = ($code === $theme && $theme !== '') ? 'original' : $code;
+            foreach (rel_files(OLD, "app/template/$code/$kind") as $f) {
+                $k = KIT . "/app/template/$kit_code/" . substr($f, strlen("app/template/$code/"));
+                if (!same(OLD . "/$f", $k)) $differ[] = $f . ' → app/template/' . $kit_code . '/' . substr($f, strlen("app/template/$code/"));
+            }
+        }
+    }
+    $css = OLD . '/html/user_data/assets/css/customize.css';
+    if (is_file($css) && !same($css, FROM . '/html/user_data/assets/css/customize.css')) {
+        $body = trim(preg_replace('/^\s*@import[^;]*;\s*$/m', '', file_get_contents($css)));
+        if ($body !== '' && !str_contains(@file_get_contents(KIT . '/html/user_data/assets/css/customize.css') ?: '', $body)) $differ[] = 'html/user_data/assets/css/customize.css（元の店の中身が、キットのものに入っていない）';
+    }
+    foreach ($differ as $d) echo "DIFFER={$d}\n";
+}
+
+if ($mode === 'pack') {
 // ---------------------------------------------------------------- app/Customize（git で追うので作業ツリーへ）
 foreach ($customize as $f) put(KIT . "/$f", OLD . "/$f");
 if (in_array('app/Customize/Resource/config/services.yaml', $customize, true)) {
@@ -150,6 +179,8 @@ if ($theme !== '') {
     if (is_dir(OLD . "/app/template/$theme")) sh('cp -a ' . escapeshellarg(OLD . "/app/template/$theme") . "/. $t/app/");
     if (is_dir(OLD . "/html/template/$theme")) sh('cp -a ' . escapeshellarg(OLD . "/html/template/$theme") . "/. $t/html/");
     sh("tar -C $t -czf " . OUT . "/theme-{$theme}.tar.gz app html");
+}
+
 }
 
 // ---------------------------------------------------------------- 画像と PluginData（ボリュームへ戻すもの）

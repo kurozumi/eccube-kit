@@ -15,6 +15,11 @@
 #       流し込む。元の店をバックアップの形（backups/<日時>-import-<名前>/）に詰め直し、bin/restore.sh で入れる。
 #       ECCUBE_AUTH_MAGIC・管理画面の URL・テーマは引き継ぎ、メールの送り先は引き継がない（検証から本物のお客さんへ
 #       メールが出ないように）。本体を直接書き換えた箇所は運ばない（diagnose の core.patch を見て app/Customize へ）。
+#   bin/import.sh cutover <ユーザー>@<ホスト>:<フォルダ> [--old-url=https://元の店/]
+#       本番の切り替え。**リハーサル（load → 直す → upgrade）を済ませ、そのリポジトリで動いている本番のキット**で打つ。
+#       元の店をメンテナンス表示にし、変わった分と DB を取り直し、データだけ（DB・画像・PluginData・ページ）を入れて
+#       bin/upgrade.sh でこのキットの版に合わせる。コードはこのリポジトリのものを使う。
+#       **途中で失敗したら、元の店のメンテナンス表示を外して営業に戻す。** DNS の向け替えは人がやる。
 #
 # 診断で見るもの（報告書は var/import/<名前>/report/report.md）:
 #   - 本体を直接書き換えた箇所（同じ版のまっさらな EC-CUBE と比べる。差分は core.patch）
@@ -34,6 +39,8 @@ cd "$(dirname "$0")/.."
 . "$(dirname "$0")/lib/guard.sh"
 # shellcheck source=lib/image.sh
 . "$(dirname "$0")/lib/image.sh"
+# shellcheck source=lib/compose.sh
+. "$(dirname "$0")/lib/compose.sh"
 
 log() { echo "[import] $*"; }
 die() { echo "[import] エラー: $*" >&2; exit 1; }
@@ -391,9 +398,169 @@ $(printf '%s\n' "$stops" | sed 's/^/         ・/')"
     log "元の店の DB と画像は ${out} にもあります（個人情報。終わったら消す）"
 }
 
+# ---------------------------------------------------------------- cutover
+# 元の店のメンテナンス表示。EC-CUBE 4 の index.php は、.maintenance（または ECCUBE_MAINTENANCE_FILE_PATH）があれば
+# 「モード:トークン」のトークンを cookie に持つ人以外へメンテナンス画面を出す。**自分で置いたものだけを外す**
+# （店が手で入れていたものは残す）。
+old_maint_path() { # old_maint_path <取ったフォルダの files> <元の店のフォルダ>
+    local p; p="$(sed -n 's/^ECCUBE_MAINTENANCE_FILE_PATH=//p' "$1/.env" 2>/dev/null | tail -1 | tr -d "\"' \r")"
+    printf '%s' "${p:-$2/.maintenance}"
+}
+
+cmd_cutover() {
+    local src="" name="" old_url=""
+    for a in "$@"; do
+        case "$a" in
+            --name=*) name="${a#--name=}" ;;
+            --old-url=*) old_url="${a#--old-url=}" ;;
+            -*) die "知らない指定です: $a" ;;
+            *) src="$a" ;;
+        esac
+    done
+    case "$src" in *:/*) ;; *) die "使い方: bin/import.sh cutover <ユーザー>@<ホスト>:<元の店のフォルダ> [--old-url=https://元の店/] [--name=<名前>]" ;; esac
+    local host="${src%%:*}" path="${src#*:}"; path="${path%/}"
+    [ -n "$name" ] || name="$(printf '%s' "${host#*@}" | tr -c 'A-Za-z0-9._-' '_')"
+    local dest="var/import/${name}"
+
+    # ── このキット（本番）が、切り替えられる状態か ──
+    [ -f .env ] || die ".env がありません。本番のサーバーで、リハーサルを済ませたリポジトリから bin/init.sh してください"
+    local proj cid kit_ver
+    proj="$(guard_project_name)"
+    cid="$(docker compose ps -q ec-cube 2>/dev/null | head -1 || true)"
+    [ -n "$cid" ] || die "キットが動いていません。docker compose up -d（本番なら bin/publish.sh）してから、もう一度"
+    kit_ver="$(image_eccube_of_container "$cid")"
+    local prod=""
+    guard_is_prod_stack && prod=--prod
+    local mailer; mailer="$(env_get MAILER_DSN)"
+    if [ -n "$prod" ]; then
+        case "$mailer" in ""|null://*|*mailpit*) die "本番なのに .env の MAILER_DSN が無い（または Mailpit）です。切り替えた瞬間から注文メールが届かなくなるので、先に書いてください" ;; esac
+    fi
+
+    log "切り替えの前に、元の店から取ってきます（元の店はまだ営業中。差分を小さくしておくため）..."
+    cmd_fetch "${host}:${path}" --name="$name" --full >/dev/null
+    resolve_src "$dest" ""
+    [ -f "$src_base/index.php" ] && grep -q 'maintenanceFile' "$src_base/index.php" \
+        || die "元の店（EC-CUBE ${src_ver}）の index.php が、ファイルでのメンテナンス表示に対応していません"
+    [ "$(printf '%s\n%s\n' "$src_series" "$(printf '%s' "$kit_ver" | cut -d. -f1-2)" | sort -V | head -1)" = "$src_series" ] \
+        || die "キットの EC-CUBE（${kit_ver}）が元の店（${src_ver}）より古いです"
+    local magic_old magic_now
+    magic_old="$(sed -n 's/^ECCUBE_AUTH_MAGIC=//p' "$src_base/.env" | tail -1 | tr -d "\"' \r")"
+    magic_now="$(env_get ECCUBE_AUTH_MAGIC)"
+    [ -n "$magic_old" ] || die "元の店の .env に ECCUBE_AUTH_MAGIC がありません"
+    local theme; theme="$(sed -n 's/^ECCUBE_TEMPLATE_CODE=//p' "$src_base/.env" 2>/dev/null | tail -1 | tr -d "\"' \r")"
+    case "${theme:-default}" in default) theme="" ;; esac
+    local mfile; mfile="$(old_maint_path "$src_base" "$path")"
+
+    echo
+    log "切り替えます: 元の店 ${host}:${path}（EC-CUBE ${src_ver}）→ このキット（${proj}・EC-CUBE ${kit_ver}）"
+    log "  1. 元の店をメンテナンス表示にする（${mfile}）。**ここからお客さんは注文できません**"
+    log "  2. 元の店から、変わった分のファイルと DB を取り直す"
+    log "  3. このキットの DB・画像を、元の店のもので置き換え、bin/upgrade.sh で EC-CUBE ${kit_ver} に合わせる"
+    log "  4. 開くか確かめる。**ここまでのどこかで失敗したら、元の店のメンテナンス表示を外して営業に戻す**"
+    log "  コード（app/Customize・テーマ・プラグイン）は、このリポジトリのもの（リハーサルで直したもの）を使います"
+    [ "$magic_old" = "$magic_now" ] || log "  .env の ECCUBE_AUTH_MAGIC を元の店の値にします"
+    local ans
+    read -r -p "始めるなら、プロジェクト名（${proj}）を打ってください: " ans
+    [ "$ans" = "$proj" ] || die "中止しました。何も変えていません"
+
+    # ── 1. 元の店をメンテナンス表示に。ここから先の失敗は、元の店を開け直す ──
+    local token; token="$(LC_ALL=C tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 24)"
+    local mine=0 reopened=0
+    reopen_old() {
+        [ "$mine" = 1 ] && [ "$reopened" = 0 ] || return 0
+        # shellcheck disable=SC2029
+        if ssh -o BatchMode=yes "$host" "[ \"\$(cat '${mfile}' 2>/dev/null)\" = 'import:${token}' ] && rm -f '${mfile}'"; then
+            reopened=1
+            echo "[import] **元の店のメンテナンス表示を外しました。元の店で営業に戻っています。**" >&2
+        else
+            echo "[import] **元の店のメンテナンス表示を外せませんでした。** 手で消してください: ssh ${host} rm '${mfile}'" >&2
+        fi
+    }
+    trap 'rc=$?; if [ "$rc" != 0 ]; then echo "[import] 切り替えに失敗しました。" >&2; reopen_old; fi' EXIT
+    trap 'exit 130' INT TERM
+    local had
+    # shellcheck disable=SC2029
+    had="$(ssh -o BatchMode=yes "$host" "if [ -e '${mfile}' ]; then echo had; else printf '%s' 'import:${token}' > '${mfile}' && echo put; fi")" \
+        || die "元の店をメンテナンス表示にできませんでした（${mfile} に書けない？）。何も変えていません"
+    case "$had" in
+        put) mine=1; log "元の店をメンテナンス表示にしました" ;;
+        had) log "元の店はもうメンテナンス表示です（店が入れたもの。終わっても外しません）" ;;
+        *) die "元の店をメンテナンス表示にできませんでした" ;;
+    esac
+    if [ -n "$old_url" ]; then
+        local code; code="$(curl -s -o /dev/null -w '%{http_code}' "$old_url" || true)"
+        [ "$code" = 503 ] || die "元の店（${old_url}）がメンテナンス画面になっていません（${code}）。注文が入り続けるので止めます"
+        log "元の店がメンテナンス画面（503）になったのを確かめました"
+    fi
+
+    # ── 2. 取り直す（変わった分だけ） ──
+    log "元の店から、変わった分のファイルと DB を取り直します..."
+    cmd_fetch "${host}:${path}" --name="$name" --full >/dev/null
+    resolve_src "$dest" ""
+    [ -n "$src_dump" ] || die "DB をダンプできませんでした"
+
+    # ── 3. データだけ流し込み、上げる ──
+    local pristine; pristine="$(get_pristine "$src_ver")"
+    local img; img="$(docker inspect -f '{{.Config.Image}}' "$cid")"
+    local out="backups/$(date +%Y%m%d-%H%M%S)-cutover-${name}"
+    mkdir -p "$out"; chmod 700 "$out"; out="$(cd "$out" && pwd)"
+    local dmount
+    case "$src_dump" in *.gz) dmount="${src_dump}:/dump/dump.sql.gz:ro" ;; *) dmount="${src_dump}:/dump/dump.sql:ro" ;; esac
+    local differ
+    differ="$(docker run --rm --user "$(id -u):$(id -g)" \
+        -v "$src_base:/old:ro" -v "$pristine:/from:ro" -v "$PWD:/kit:ro" -v "$out:/out" -v "$dmount" \
+        -v "$PWD/bin/lib/import-pack.php:/kit-pack.php:ro" \
+        --entrypoint php "$img" -d memory_limit=1G /kit-pack.php pack-data "$theme" | sed -n 's/^DIFFER=//p')" \
+        || die "元の店のデータを詰め直せませんでした"
+
+    log "このキットのいまの状態を控えます（BACKUP_LABEL=before-cutover）..."
+    BACKUP_LABEL=before-cutover bin/backup.sh >/dev/null || die "このキットを控えられませんでした。何も変えていません"
+
+    [ "$magic_old" = "$magic_now" ] || set_env ECCUBE_AUTH_MAGIC "$magic_old"
+    # shellcheck disable=SC2046
+    local dc=(docker compose $(compose_files $prod))
+    log "アプリを止めて、DB を元の店のものにします..."
+    "${dc[@]}" stop ec-cube worker >/dev/null 2>&1 || "${dc[@]}" stop ec-cube >/dev/null
+    bin/restore.sh --rollback --db-only "$out" >/dev/null || die "DB を流し込めませんでした（控え: backups/*-before-cutover）"
+    log "画像とプラグインが置いたファイルを入れます..."
+    docker run --rm -i -v "${proj}_eccube_upload:/upload" alpine:3 sh -c 'tar -C / -xzf - && chown -R 33:33 /upload' < "$out/upload.tar.gz" \
+        || die "画像を入れられませんでした"
+    if [ -f "$out/plugindata.tar.gz" ]; then
+        docker run --rm -i -v "${proj}_eccube_app:/app" alpine:3 sh -c 'mkdir -p /app/app && rm -rf /app/app/PluginData && tar -C /app/app -xzf - && chown -R 33:33 /app/app/PluginData' < "$out/plugindata.tar.gz" \
+            || die "プラグインが置いたファイルを入れられませんでした"
+    fi
+    tar -xzf "$out/admin-files.tar.gz" || die "ページ（app/template/user_data）を入れられませんでした"
+
+    log "EC-CUBE ${kit_ver} に合わせます（bin/upgrade.sh。スキーマの更新・migration。失敗したら自動で戻ります）..."
+    local constraint; constraint="$(env_get ECCUBE_VERSION)"
+    # 確認（取ったイメージで続けるか）には y で答える。`yes |` にすると pipefail が yes の SIGPIPE を失敗と数える
+    bin/upgrade.sh "${constraint:-$kit_ver}" $prod < <(yes y) > "$out/upgrade.log" 2>&1 \
+        || { tail -20 "$out/upgrade.log" >&2; die "上げられませんでした（${out}/upgrade.log）"; }
+    log "プラグインの版を DB に合わせます（bin/plugin.sh sync）..."
+    bin/plugin.sh sync > "$out/plugin-sync.log" 2>&1 || { tail -20 "$out/plugin-sync.log" >&2; die "プラグインを合わせられませんでした（${out}/plugin-sync.log）"; }
+    bin/healthcheck.sh > "$out/healthcheck.log" 2>&1 || { cat "$out/healthcheck.log" >&2; die "開くかの確認に失敗しました"; }
+
+    trap - EXIT INT TERM
+    echo
+    log "**切り替えの準備ができました。** 元の店はメンテナンス表示のままです（このキットの側で注文を受けます）。"
+    if [ -n "$differ" ]; then
+        log "元の店の管理画面で直されていて、このリポジトリのものと違うファイルがあります（運んでいません。必要なら手で移す）:"
+        printf '%s\n' "$differ" | sed 's/^/    /'
+    fi
+    log "次にやること:"
+    log "  1) このキットの画面を、本番の URL を向ける前に確かめる（管理画面に元の店のパスワードで入れる・商品・カート）"
+    log "  2) DNS（Cloudflare）を、このサーバーのトンネルへ向け替える"
+    log "  3) 決済会社に、通知の URL と新しいサーバーの IP を登録する（診断の「店に確かめること」）"
+    local crons; crons="$(sed -n 's/^cron=//p' "$dest/meta.env" 2>/dev/null)"
+    [ -z "$crons" ] || { log "  4) 元のサーバーの cron を止める:"; printf '%s\n' "$crons" | sed 's/^/       /'; }
+    log "  やめて元の店に戻すなら（このキットで注文を受ける前だけ）: ssh ${host} rm '${mfile}'"
+    log "  git status で、ページ（app/template/user_data）の変更をコミットしてください"
+}
+
 case "$1" in
+    cutover) shift; cmd_cutover "$@" ;;
     load) shift; cmd_load "$@" ;;
     fetch) shift; cmd_fetch "$@" ;;
     diagnose) shift; cmd_diagnose "$@" ;;
-    *) die "知らないコマンドです: $1（fetch / diagnose / load）" ;;
+    *) die "知らないコマンドです: $1（fetch / diagnose / load / cutover）" ;;
 esac
