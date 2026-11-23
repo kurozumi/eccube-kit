@@ -191,8 +191,10 @@ put_theme() { # put_theme <app/ と html/ を持つディレクトリ> <.base �
     local src="$1" label="$2" gk_html=0 gk_app=0
     [ -f "${dir}/.gitkeep" ] && gk_html=1
     [ -f "${appdir}/.gitkeep" ] && gk_app=1
-    rm -rf "$dir" "$appdir"
+    # **フォルダごと消さない。中身だけ消す。** html/template/original は compose が bind mount しているので、
+    # 消して作り直すと、動いているコンテナは消えた古いフォルダを見続け、静的物が全部 404 になる（取り込みの試験で踏んだ）
     mkdir -p "$dir" "$appdir"
+    find "$dir" "$appdir" -mindepth 1 -delete
     cp -a "${src}/html/." "$dir/"
     cp -a "${src}/app/." "$appdir/"
     [ "$gk_html" = 1 ] && : > "${dir}/.gitkeep"
