@@ -62,3 +62,6 @@
 
 # 紹介サイトを wrangler dev で見たときの作業場所
 .wrangler/
+
+# Python のキャッシュ（.github/scripts を手元で動かすとできる）
+__pycache__/
