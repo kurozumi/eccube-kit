@@ -94,6 +94,10 @@ DoctrineMigrations / config / Plugin）と `html/user_data`（独自 CSS/JS）�
 - **PHP は系列ごとに複数焼く**（4.2: 8.1/8.2、4.3: 8.1/8.2/8.3、4.4: 8.2〜8.5。上流 README の
   対応一覧）。`-php` 無しの短いタグは系列の既定（`image_php_for_series`）。phpredis は系列で
   決まる（4.2/4.3: 6.0.2、4.4: 6.3.0）。**matrix と `bin/lib/image.sh` を揃える。**
+  **PHP を足したら `image_php_eol` にも期限を足す。** `deploy.sh` の最後と `doctor` が、期限の年の 10 月から
+  「注意」と次のコマンドを出す（同じ系列に新しい PHP があれば `upgrade.sh <いまの版> --php=`、無ければ系列を上げる。
+  docs/upgrade.md「PHP のサポートが切れるとき」）。**4.2 → 4.3 は `--php=8.3` を付けないと 8.2 のまま残る**
+  （`image_resolve_php` はいまの PHP が使える限り引き継ぐ）。
   **既定（matrix の `default: true`）を動かすと、短いタグを追っている本番の PHP が次の焼き直しで
   黙って変わる。** 定期の焼き直しは main のワークフローで回るので、リリースを待たずマージした時点で
   効く。4.3 の既定を 8.2 → 8.3 にしたのは 8.2 のサポート切れ（2026-12-31）のため。

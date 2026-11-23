@@ -533,3 +533,12 @@ maint_off
 deploy_record "$(git rev-parse HEAD 2>/dev/null || echo "${sent_sha:-?}")" "$([ -d .git ] && echo pull || echo push)" "$by" "done${sent_note:-}"
 log "完了。${after:-?} を公開しています。（記録: var/deploy.log）"
 log "管理画面とフロントを目で確認してください。"
+
+# PHP のサポート切れを知らせる（終わる年の 10 月から）。店の人が毎日見るのはここ
+php_cid="$("${dc[@]}" ps -q ec-cube 2>/dev/null | head -1 || true)"
+if [ -n "$php_cid" ]; then
+    php_notice="$(image_php_eol_notice "$(image_php_of_container "$php_cid")" "$(image_eccube_of_container "$php_cid")")"
+    if [ -n "$php_notice" ]; then
+        printf '%s\n' "$php_notice" | sed 's/^/[deploy] 注意: /'
+    fi
+fi
