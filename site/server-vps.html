@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VPS で始める | EC-CUBE 運用キット</title>
+<meta name="description" content="EC-CUBE 4 の本番を VPS に。注文の選び方、最初のログイン、SSH を固める、ファイアウォール、自動更新、Cloudflare R2 へのバックアップまで。">
+<meta property="og:title" content="EC-CUBE 運用キット — VPS で始める">
+<meta property="og:description" content="EC-CUBE 4 の本番を VPS に。注文の選び方、最初のログイン、SSH を固める、ファイアウォール、自動更新、Cloudflare R2 へのバックアップまで。">
+<meta property="og:type" content="website">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#E8621C">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@500;700;900&family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topnav"><div class="wrap"><a class="brand" href="./"><img src="favicon.svg" alt="">EC-CUBE 運用キット</a><nav aria-label="ページ"><a href="./">トップ</a><a href="guide.html">はじめる・上げる</a><a href="ops.html">更新と反映</a><a href="server.html" aria-current="page">本番サーバー</a><a href="scale.html">大規模アクセス</a><a href="https://github.com/kurozumi/eccube-kit">GitHub</a></nav></div></div>
+
+<header class="pagehead">
+  <div class="wrap">
+    <p class="eyebrow">eccube-docker · __TAG__ · <a href="server.html">本番サーバー</a></p>
+    <h1>VPS で始める</h1>
+    <p class="lede">VPS を注文するところから、最初のログイン、SSH の守りを自分で固め、バックアップを Cloudflare R2 へ送るところまで。終わったら <a href="server.html#common">どこでも同じ後半</a> へ進みます。</p>
+  </div>
+</header>
+
+<section id="words">
+  <div class="wrap">
+    <h2>先に知っておく<em class="k">言葉</em></h2>
+    <div class="terms">
+      <div class="term"><p class="tag">サーバー</p><h3>VPS</h3><p>1 台の大きな機械を区切って貸してもらう、自分専用のサーバー。さくらの VPS・ConoHa VPS・Xserver VPS などがあり、料金は月額で決まっています。</p></div>
+      <div class="term"><p class="tag">ファイアウォール</p><h3>パケットフィルター</h3><p>VPS の管理画面で設定する「どの番号の口を開けるか」の決まり。会社によって「セキュリティグループ」「ファイアウォール」とも呼びます。<strong>サーバーの外で効く</strong>ので、これがいちばん確かです。</p></div>
+      <div class="term"><p class="tag">管理者</p><h3>root と sudo</h3><p>root はサーバーで何でもできる特別なユーザー。ふだんは自分用のユーザーで入り、必要なときだけ <code>sudo</code> を付けて root の力を借ります。</p></div>
+      <div class="term"><p class="tag">ファイルの置き場</p><h3>Cloudflare R2</h3><p>Cloudflare のファイル置き場（S3 と同じ使い方ができる）。ドメインを Cloudflare に置いているので、同じ画面で使えます。バックアップと、必要なら商品画像の置き場に。</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="steps">
+  <div class="wrap">
+    <h2>サーバーを<em class="k">固める</em>まで</h2>
+    <p class="sub">VPS の会社ごとに画面は違いますが、決めることは同じです。会社の画面で見つからない項目は、その会社のマニュアルで同じ名前を探してください。</p>
+
+    <div class="flow" id="order">
+      <div class="flow-head">
+        <span class="letter">A</span>
+        <h3>注文する</h3>
+        <p>大きさの目安: <strong>最低 2 コア・メモリ 4GB・ディスク 50GB 以上</strong>（PHP が 20 本で約 1.6GB、キャッシュの組み立てに 1GB、DB に 0.5GB を使います）。商品やアクセスが多いなら 8GB。</p>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where eye">ブラウザ</span>管理画面のアカウントに二段階認証</h4>
+<p>VPS の会社の会員ページで、二段階認証を有効にします。ここを乗っ取られると、サーバーを再インストールされて、すべて消えます。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>OS と地域</h4>
+<p>OS は <strong>Ubuntu 24.04</strong>（「アプリ」「テンプレート」ではなく素の OS）。地域を選べるなら東京か大阪。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>root のパスワードと SSH 鍵</h4>
+<p>root のパスワードは、パスワードマネージャで作った長いものに（すぐに使わなくなりますが、念のため）。<strong>SSH 鍵を登録できるなら</strong>、<a href="server.html#sshkey">作った公開鍵</a>（<code>~/.ssh/id_ed25519.pub</code> の中身）を登録します。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>パケットフィルター</h4>
+<p><strong>SSH（22 番）だけを許可</strong>し、Web（80 / 443）は許可しません（公開は Tunnel で、外から入る口は要りません）。許可する相手を IP アドレスで絞れるなら、自分の IP に（<code>curl -s https://api.ipify.org</code> で調べられます）。</p></li>
+      </ol>
+    </div>
+
+    <div class="flow" id="firstlogin">
+      <div class="flow-head">
+        <span class="letter">B</span>
+        <h3>最初のログインと、自分用のユーザー</h3>
+        <p>最初は root で入ります。root のまま作業を続けず、自分用のユーザー（ここでは <code>shop</code>）を作って、以後はそちらで入ります。</p>
+        <div class="keep"><b>入ったターミナルは閉じない。</b>この節と次の節が終わって、新しいユーザーで入れることを別の窓で確かめるまで、最初の窓は開いたままにします。閉じ出されても、この窓から直せます。</div>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where pc">パソコン</span>root で入る</h4>
+<pre>ssh root@203.0.113.10</pre>
+<p>IP は VPS の管理画面に出ています。鍵を登録していればそのまま、していなければ root のパスワードを聞かれます。会社によっては最初のユーザーが <code>ubuntu</code> のこともあります（そのときは <code>ssh ubuntu@…</code> で入り、以下の <code>adduser</code> からの手順に <code>sudo</code> を付けます）。</p></li>
+        <li><h4><span class="where srv">サーバー</span>更新して、自分用のユーザーを作る</h4>
+<pre>apt-get update &amp;&amp; apt-get -y upgrade
+adduser shop            <span class="c"># パスワードを 2 回聞かれる（コンソールで入るときに使う）</span>
+usermod -aG sudo shop</pre></li>
+        <li><h4><span class="where srv">サーバー</span>sudo をパスワード無しにする</h4>
+<pre>echo 'shop ALL=(ALL) NOPASSWD:ALL' &gt; /tmp/90-shop
+visudo -cf /tmp/90-shop &amp;&amp; install -m 440 /tmp/90-shop /etc/sudoers.d/90-shop</pre>
+<p>キットはパソコンから SSH 越しに <code>sudo</code> を打つので、パスワードを聞かれると止まります。AWS や Google Cloud のサーバーも最初からこの設定です。<code>shop</code> はこのあと Docker を動かすグループに入り、どのみち root と同じことができるので、sudo のパスワードは守りになりません。<strong>守りは「鍵を持っている人しか入れない」ことのほうです</strong>（次の節）。<code>visudo -cf</code> は書き間違いの検査で、<code>parsed OK</code> と出たときだけ入れます。</p></li>
+        <li><h4><span class="where srv">サーバー</span>鍵を新しいユーザーへ写す（root に鍵を登録した場合）</h4>
+<pre>install -d -m 700 -o shop -g shop /home/shop/.ssh
+install -m 600 -o shop -g shop /root/.ssh/authorized_keys /home/shop/.ssh/authorized_keys</pre>
+<p>root にパスワードで入った場合は、代わりに<strong>パソコンから</strong> <code>ssh-copy-id shop@203.0.113.10</code>（<code>shop</code> のパスワードを聞かれます）。</p></li>
+        <li><h4><span class="where pc">パソコン</span>呼び名を書いて、新しいユーザーで入ってみる</h4>
+<pre><span class="c"># ~/.ssh/config に足す（ファイルが無ければ作る）</span>
+Host shop
+  HostName 203.0.113.10
+  User shop
+  IdentityFile ~/.ssh/id_ed25519</pre>
+<pre><span class="c"># 新しいターミナルの窓で</span>
+ssh shop
+sudo whoami    <span class="c"># パスワードを聞かれずに root と出れば OK</span></pre></li>
+      </ol>
+    </div>
+
+    <div class="flow" id="harden">
+      <div class="flow-head">
+        <span class="letter">C</span>
+        <h3>SSH を固める</h3>
+        <p>パスワードでのログインと、root での直接ログインを止めます。鍵を持っている人しか入れなくなります。</p>
+        <div class="keep"><b>ファイル名は <code>00-</code> で始める。</b>SSH は設定ファイルを名前の順に読み、<strong>最初に読んだ値を使います。</strong>VPS の多くは <code>50-cloud-init.conf</code> に「パスワードを許可」と書いてあり、<code>99-</code> のような名前にすると負けて、パスワードのログインが残ります（Ubuntu 24.04 で確かめました）。</div>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where srv">サーバー</span>設定を書く</h4>
+<pre>sudo tee /etc/ssh/sshd_config.d/00-eccube.conf &gt;/dev/null &lt;&lt;'EOF'
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+EOF</pre></li>
+        <li><h4><span class="where srv">サーバー</span>書き間違いがないかを見て、効かせる</h4>
+<pre>sudo sshd -t &amp;&amp; sudo systemctl restart ssh</pre>
+<p><code>sshd -t</code> が何も言わなければ書き間違いはありません。何か出たら、直すまで <code>restart</code> しません。</p></li>
+        <li><h4><span class="where srv">サーバー</span>効いているかを見る</h4>
+<pre>sudo sshd -T | grep -E "^(passwordauthentication|kbdinteractiveauthentication|permitrootlogin) "</pre>
+<p>3 つとも <code>no</code> なら大丈夫です。</p></li>
+        <li><h4><span class="where pc">パソコン</span>別の窓で、入れること・パスワードでは入れないことを確かめる</h4>
+<pre>ssh shop 'echo ok'
+ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password shop@203.0.113.10</pre>
+<p>1 行目が <code>ok</code>、2 行目が <code>Permission denied (publickey)</code> なら成功です。ここまで確かめたら、最初の root の窓を閉じて構いません。</p></li>
+      </ol>
+    </div>
+
+    <div class="flow" id="firewall">
+      <div class="flow-head">
+        <span class="letter">D</span>
+        <h3>ファイアウォールと自動更新</h3>
+        <p>サーバーの中でも SSH 以外を閉じ、OS のセキュリティ更新が毎日入るようにします。</p>
+        <div class="keep"><b>ufw は Docker を止められない。</b>Docker はコンテナのポートを開くとき ufw を通りません。Tunnel で公開するなら開くポートは無いので困りませんが、外から届く口の決め手は、管理画面のパケットフィルターのほうです。</div>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where srv">サーバー</span>ufw で SSH だけ開ける</h4>
+<pre>sudo ufw allow OpenSSH
+sudo ufw enable        <span class="c"># 「SSH が切れるかも」と聞かれたら y</span>
+sudo ufw status</pre>
+<p><code>OpenSSH ALLOW</code> の行があれば大丈夫です。<strong><code>allow OpenSSH</code> を先に打ってから <code>enable</code>。</strong>逆にすると、その場で締め出されます（VPS の管理画面の「コンソール」から入って直せます）。</p></li>
+        <li><h4><span class="where srv">サーバー</span>OS の自動更新を確かめる</h4>
+<pre>systemctl is-enabled unattended-upgrades</pre>
+<p><code>enabled</code> なら、セキュリティ更新は毎日自動で入ります。出なければ <code>sudo apt-get install -y unattended-upgrades &amp;&amp; sudo dpkg-reconfigure -plow unattended-upgrades</code>（「はい」）。</p></li>
+        <li><h4><span class="where srv">サーバー</span>月に 1 回、再起動する</h4>
+<pre>ls /var/run/reboot-required 2&gt;/dev/null &amp;&amp; sudo reboot</pre>
+<p>カーネルの更新は、再起動するまで効きません。ファイルがあれば「再起動が要る」という意味です。お客さんの少ない時間に。お店は自動で立ち上がります。</p></li>
+      </ol>
+    </div>
+
+    <div class="flow" id="backup">
+      <div class="flow-head">
+        <span class="letter">E</span>
+        <h3>バックアップの置き場（Cloudflare R2）</h3>
+        <p>VPS には AWS や Google Cloud のような「サーバーの役割」が無いので、鍵をサーバーに置くことになります。<strong>そのぶん、鍵は 1 つのバケットだけに絞ります。</strong></p>
+        <div class="keep"><b>古いバックアップは R2 が消す。</b>バケットの決まり（ライフサイクル）で、30 日たったら消えるようにします。VPS の会社の「自動バックアップ」（ディスクごとの控え）も、あれば併せて使うと安心です。</div>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where eye">ブラウザ</span>バケットを作る</h4>
+<p>Cloudflare の画面 →「R2 オブジェクト ストレージ」（初回は利用の申し込み。無料枠があります）→「バケットを作成」→ 名前 <code>myshop-backup</code>、場所は「アジア太平洋」。<strong>公開アクセスは有効にしません。</strong></p></li>
+        <li><h4><span class="where eye">ブラウザ</span>30 日で消える決まりを作る</h4>
+<p>バケット →「設定」→「オブジェクト ライフサイクル ルール」→ ルールを追加 → 30 日後にオブジェクトを削除。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>このバケットだけの鍵を作る</h4>
+<p>R2 の画面 →「API トークンを管理」→「API トークンを作成」。権限「オブジェクト読み取りと書き込み」、<strong>「特定のバケットのみに適用」→ <code>myshop-backup</code></strong>。作ると「アクセスキー ID」「シークレット アクセスキー」「エンドポイント（<code>https://&lt;アカウント ID&gt;.r2.cloudflarestorage.com</code>）」が出ます。<strong>シークレットはこのとき 1 回しか表示されません。</strong>パスワードマネージャへ。</p></li>
+        <li><h4><span class="where srv">サーバー</span>rclone を入れて、送り先を登録する</h4>
+<pre>sudo apt-get install -y unzip &amp;&amp; curl -fsSL https://rclone.org/install.sh | sudo bash
+rclone config create r2backup s3 provider=Cloudflare \
+  access_key_id=&lt;アクセスキー ID&gt; secret_access_key=&lt;シークレット&gt; \
+  endpoint=https://&lt;アカウント ID&gt;.r2.cloudflarestorage.com \
+  region=auto no_check_bucket=true
+chmod 600 ~/.config/rclone/rclone.conf</pre>
+<p><code>no_check_bucket=true</code> は、バケットを作ろうとしない設定です（このバケットだけの鍵には、その権限がありません）。鍵は <code>~/.config/rclone/rclone.conf</code> に入るので、自分しか読めないようにします。</p></li>
+        <li><h4><span class="where pc">パソコン</span>あとは共通の手順で</h4>
+<p><a href="server.html#common">どこでも同じ後半</a>の「バックアップを毎日取る」で <code>bin/setup.sh backup</code> を打ったら、「1) rclone」→ 送り先 <code>r2backup</code> → パス <code>myshop-backup/myshop</code> と答えます。</p></li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section id="later">
+  <div class="wrap">
+    <h2>知っておくこと</h2>
+
+    <div class="two faq">
+      <div class="box"><h4>メールはサーバーから直接送らない</h4><ul>
+        <li>多くの VPS は、迷惑メール対策でメールの 25 番を塞いでいます。送れても、VPS の IP からのメールは迷惑メールに入りがちです。</li>
+        <li>SendGrid・Resend・Amazon SES などの送信サービスを使い、<code>bin/setup.sh mail --remote=shop:/srv/myshop</code> で入れます（587 番）。</li>
+      </ul></div>
+      <div class="box"><h4>商品画像を R2 から配る</h4><ul>
+        <li>バックアップとは別のバケットと、そのバケットだけの鍵を作ります。手順は <a href="images.html#howto">商品画像を S3 / R2 から配る</a>。</li>
+        <li>R2 はバケットにカスタムドメイン（<code>img.example.com</code>）を付けるだけで Cloudflare の CDN から配られ、配信の転送量もかかりません。</li>
+      </ul></div>
+      <div class="box"><h4>入れなくなったら</h4><ul>
+        <li>VPS の管理画面にある「コンソール」（ブラウザから直接サーバーの画面を開く機能）から入れます。SSH の設定やファイアウォールを間違えても、ここから直せます。</li>
+        <li>そのために、<code>shop</code> のパスワードはパスワードマネージャに控えておきます。</li>
+      </ul></div>
+      <div class="box"><h4>止まったら知らせる</h4><ul>
+        <li>UptimeRobot などで <code>https://お店のドメイン/</code> を 5 分おきに見ます。</li>
+        <li>VPS の会社の障害情報のページも、ブックマークしておきます。</li>
+      </ul></div>
+    </div>
+
+    <div class="two" style="margin-top:28px">
+      <div class="box no"><h3>やらないこと</h3><ul>
+        <li><strong>root のままで作業を続ける。</strong>打ち間違い 1 つで取り返しがつきません。</li>
+        <li><strong>パスワードでの SSH を残す。</strong>世界中から総当たりで試されます。</li>
+        <li><strong>R2 の鍵を「すべてのバケット」に効くもので作る。</strong>漏れたときの被害が、そのアカウントの全部になります。</li>
+        <li><strong>「アプリ」「テンプレート」の EC-CUBE を選ぶ。</strong>VPS の会社が用意した EC-CUBE は、このキットとは別物です。素の Ubuntu を選びます。</li>
+      </ul></div>
+    </div>
+
+    <div class="note">
+      <b>次へ</b>
+      <span>新しいユーザーで SSH に入れて、バックアップの置き場ができたら、<a href="server.html#common">どこでも同じ後半</a>へ進みます（時刻を日本時間に → Docker とファイル → メール → Tunnel → 公開 → バックアップ）。</span>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <h2>ほかの借り先</h2>
+    <div class="nextpages"><a class="nextpage" href="server.html"><span class="tag">本番サーバー</span><h3>全体と<em class="k">守り方</em></h3><p>できあがりの形、7 つの決まり、どこでも同じ後半、公開前の確認。</p></a><a class="nextpage" href="server-aws.html"><span class="tag">AWS</span><h3>AWS で<em class="k">始める</em></h3><p>EC2・IAM ロール・S3・SES。</p></a><a class="nextpage" href="server-gcp.html"><span class="tag">Google Cloud</span><h3>Google Cloud で<em class="k">始める</em></h3><p>Compute Engine・サービスアカウント・Cloud Storage。</p></a></div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>Apache License 2.0。EC-CUBE は対象外で、EC-CUBE 自身のライセンスがそのまま適用されます（EC-CUBE は一切改変していません）。</p>
+    <p><a href="https://github.com/kurozumi/eccube-kit/releases">リリース</a> · <a href="https://github.com/kurozumi/eccube-kit/issues">Issue</a> · <a href="https://github.com/kurozumi/eccube-kit/blob/main/LICENSE">LICENSE</a> · <a href="https://github.com/kurozumi/eccube-kit/security/policy">脆弱性の報告（非公開）</a></p>
+    <p>作った人: Akira Kurozumi（<a href="https://a-zumi.net/">a-zumi.net</a>）· <a href="./#contact">お問い合わせ</a></p>
+    <p>この環境は非公式です。EC-CUBE は株式会社イーシーキューブの登録商標で、同社とは無関係です。</p>
+  </div>
+</footer>
+
+<div class="fab" id="fab" hidden>
+  <div class="fab-menu" id="fab-menu" role="dialog" aria-label="お問い合わせ / Issue">
+    <div class="head">困ったこと、こう動いてほしい<small>どちらも歓迎です。うまく書けなくて構いません。</small></div>
+    <a class="fab-item" href="https://github.com/kurozumi/eccube-kit/issues/new" target="_blank" rel="noopener">
+      <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg></span>
+      <span><b>Issue を書く</b><span>不具合・要望・質問。GitHub で公開の相談</span></span>
+    </a>
+    <a class="fab-item" href="mailto:info@a-zumi.net?subject=eccube-docker%20%E3%81%AE%E7%9B%B8%E8%AB%87">
+      <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></span>
+      <span><b>メールで相談する</b><span>公開できない話、受託の構築・引っ越し</span></span>
+    </a>
+  </div>
+  <button class="fab-btn" id="fab-btn" type="button" aria-expanded="false" aria-controls="fab-menu">
+    <svg class="chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H8l-5 3 1.2-4.2A8 8 0 1 1 21 12z"/></svg>
+    <svg class="x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    <span>お問い合わせ / Issue</span>
+  </button>
+</div>
+<script>
+(function () {
+  var fab = document.getElementById('fab');
+  var btn = document.getElementById('fab-btn');
+  var contact = document.getElementById('contact');
+  if (!fab || !btn) return;
+  fab.hidden = false;
+  var menu = document.getElementById('fab-menu');
+  // 閉じている間はメニューの中に Tab で入れないようにする（見えないリンクにフォーカスが行かない）
+  if (menu) menu.inert = true;
+  function setOpen(v) {
+    if (!v && menu && menu.contains(document.activeElement)) btn.focus();
+    fab.classList.toggle('open', v);
+    btn.setAttribute('aria-expanded', v ? 'true' : 'false');
+    if (menu) menu.inert = !v;
+  }
+  btn.addEventListener('click', function () { setOpen(!fab.classList.contains('open')); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') setOpen(false); });
+  document.addEventListener('click', function (e) { if (!fab.contains(e.target)) setOpen(false); });
+  // 連絡先の節が見えている間は出さない（同じものが二重に見えないように）
+  if (contact && 'IntersectionObserver' in window) {
+    new IntersectionObserver(function (es) {
+      var seen = es[0].isIntersecting;
+      fab.hidden = seen;
+      if (seen) setOpen(false);
+    }, { threshold: 0.15 }).observe(contact);
+  }
+})();
+</script>
+</body>
+</html>

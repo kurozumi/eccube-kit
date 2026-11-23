@@ -360,7 +360,10 @@ EOS
             echo "[setup] いまある送り先:"; rclone listremotes | sed 's/^/           /'
             ask remote "使う送り先の名前（末尾の : は要らない）"; remote="${remote%:}"
             ask sub "その中の置き場所（例: backups/myshop）" "backups/$(basename "$PWD")"
-            echo "[setup] 試しています..."; rclone mkdir "${remote}:${sub}" && rclone lsd "${remote}:" >/dev/null || { echo "[setup] ${remote}: に書けません。rclone config で設定を確かめてください。" >&2; exit 1; }
+            # 見るのは送り先の中だけ。**`rclone lsd <remote>:`（バケットの一覧）にしない。** 1 つのバケットだけを扱える鍵や
+            # ロール（AWS の ListAllMyBuckets 無し、Google Cloud の buckets.list 無し、R2 のバケットを指定したトークン）は
+            # バケットの一覧を取れず、正しく絞った設定ほど「書けません」で止まっていた。書けるかは、このあと 1 回取る backup.sh が確かめる
+            echo "[setup] 試しています..."; rclone mkdir "${remote}:${sub}" && rclone lsf --max-depth 1 "${remote}:${sub}" >/dev/null || { echo "[setup] ${remote}:${sub} を読めません。rclone config で設定と、鍵（ロール）の権限を確かめてください。" >&2; exit 1; }
             sync="rclone:${remote}:${sub}" ;;
         2)  ask dest "送り先（user@host:/path）"; h="${dest%%:*}"; d="${dest#*:}"
             echo "[setup] 試しています..."; ssh -o ConnectTimeout=10 "$h" "mkdir -p '$d' && test -w '$d'" || { echo "[setup] ${dest} に書けません（ssh の鍵、パス、権限）。" >&2; exit 1; }

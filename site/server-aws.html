@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AWS で始める | EC-CUBE 運用キット</title>
+<meta name="description" content="EC-CUBE 4 の本番を AWS に。アカウントの守り、EC2、セキュリティグループ、鍵を置かない S3 へのバックアップ（IAM ロール）、SES のメールまで、初めてでも分かる手順。">
+<meta property="og:title" content="EC-CUBE 運用キット — AWS で始める">
+<meta property="og:description" content="EC-CUBE 4 の本番を AWS に。アカウントの守り、EC2、セキュリティグループ、鍵を置かない S3 へのバックアップ（IAM ロール）、SES のメールまで、初めてでも分かる手順。">
+<meta property="og:type" content="website">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#E8621C">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@500;700;900&family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topnav"><div class="wrap"><a class="brand" href="./"><img src="favicon.svg" alt="">EC-CUBE 運用キット</a><nav aria-label="ページ"><a href="./">トップ</a><a href="guide.html">はじめる・上げる</a><a href="ops.html">更新と反映</a><a href="server.html" aria-current="page">本番サーバー</a><a href="scale.html">大規模アクセス</a><a href="https://github.com/kurozumi/eccube-kit">GitHub</a></nav></div></div>
+
+<header class="pagehead">
+  <div class="wrap">
+    <p class="eyebrow">eccube-docker · __TAG__ · <a href="server.html">本番サーバー</a></p>
+    <h1>AWS で始める</h1>
+    <p class="lede">AWS のアカウントを守るところから、EC2 のサーバーを作り、鍵を置かずにバックアップを S3 へ送るところまで。終わったら <a href="server.html#common">どこでも同じ後半</a> へ進みます。</p>
+  </div>
+</header>
+
+<section id="words">
+  <div class="wrap">
+    <h2>先に知っておく<em class="k">言葉</em></h2>
+    <div class="terms">
+      <div class="term"><p class="tag">サーバー</p><h3>EC2</h3><p>AWS で借りるサーバー（仮想マシン）。1 台を「インスタンス」と呼びます。</p></div>
+      <div class="term"><p class="tag">ファイアウォール</p><h3>セキュリティグループ</h3><p>サーバーに「誰が・どの番号の口から」入れるかの決まり。ここに書いていない通信は全部断られます。</p></div>
+      <div class="term"><p class="tag">ファイルの置き場</p><h3>S3 とバケット</h3><p>ファイルを置く場所。1 つの置き場を「バケット」と呼びます。名前は世界中で重ならないものにします。</p></div>
+      <div class="term"><p class="tag">権限</p><h3>IAM ロール</h3><p>サーバーに付ける「役割」。役割に「このバケットに書いてよい」と決めておくと、<strong>鍵のファイルを置かずに</strong>サーバーから S3 へ書けます。</p></div>
+      <div class="term"><p class="tag">固定の住所</p><h3>Elastic IP</h3><p>サーバーに付ける変わらない IP アドレス。付けないと、止めて起動し直すたびに IP が変わり、SSH の行き先を書き直すことになります。</p></div>
+      <div class="term"><p class="tag">場所</p><h3>リージョン</h3><p>サーバーを置く地域。日本のお店なら<strong>アジアパシフィック（東京）ap-northeast-1</strong>。画面の右上でいつも確かめます（ほかの地域で作ると、見つからなくなります）。</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="steps">
+  <div class="wrap">
+    <h2>サーバーを<em class="k">作る</em>まで</h2>
+    <p class="sub">画面の項目名は 2026 年 11 月の日本語の管理画面のものです。名前が変わっていたら、<strong>何をしたいか</strong>で探してください。</p>
+
+    <div class="flow" id="account">
+      <div class="flow-head">
+        <span class="letter">A</span>
+        <h3>アカウントを守る</h3>
+        <p>サーバーより先に、AWS のアカウントそのものを守ります。乗っ取られると、高いサーバーを大量に立てられて、請求があなたに来ます。</p>
+        <div class="keep"><b>ルートユーザーはふだん使わない。</b>登録したメールアドレスで入るのがルートユーザーで、何でもできてしまいます。二段階認証をかけたら、しまっておきます。</div>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where eye">ブラウザ</span>ルートユーザーに二段階認証（MFA）</h4>
+<p>右上のアカウント名 →「セキュリティ認証情報」→「MFA を割り当てる」。スマートフォンの認証アプリか、パスキーを登録します。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>ふだん使う管理ユーザーを作る</h4>
+<p>IAM →「ユーザー」→「ユーザーの作成」。名前（例: <code>admin-yourname</code>）、「AWS マネジメントコンソールへのユーザーアクセスを提供する」にチェック。許可は「ポリシーを直接アタッチする」→ <code>AdministratorAccess</code>。作ったら、このユーザーにも MFA を割り当て、以後はこのユーザーで入ります。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>料金の通知を設定する</h4>
+<p>「請求とコスト管理」→「予算」→「予算を作成」→ テンプレート「月次コスト予算」。金額（例: 月 10,000 円ぶんの USD）と通知先のメールを入れます。<strong>思ったより高いと気づけるのは、ここだけです。</strong></p></li>
+      </ol>
+    </div>
+
+    <div class="flow" id="ec2">
+      <div class="flow-head">
+        <span class="letter">B</span>
+        <h3>EC2 のサーバーを作る</h3>
+        <p>右上のリージョンが「東京」になっているのを確かめてから、EC2 →「インスタンスを起動」。上から順に埋めます。</p>
+        <p>大きさの目安: <strong>最低 2 vCPU・メモリ 4GB</strong>（PHP が 20 本で約 1.6GB、キャッシュの組み立てに 1GB、DB に 0.5GB を使います）。商品やアクセスが多いなら 8GB。</p>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where pc">パソコン</span>公開鍵を AWS に登録する</h4>
+<p>先に EC2 →「キーペア」→「アクション」→「キーペアをインポート」。名前（例: <code>shop</code>）を付け、<a href="server.html#sshkey">作った公開鍵</a>（<code>~/.ssh/id_ed25519.pub</code> の中身）を貼ります。AWS に鍵を作らせて <code>.pem</code> をダウンロードするやり方より、秘密鍵がパソコンの外に出ないぶん安全です。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>名前と OS</h4>
+<p>名前: <code>myshop</code>。「アプリケーションおよび OS イメージ」→ <strong>Ubuntu</strong> →「Ubuntu Server 24.04 LTS」。アーキテクチャは「64 ビット (Arm)」にすると同じ性能で安くなります（キットは Arm でも動きます）。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>インスタンスタイプ</h4>
+<p>Arm なら <code>t4g.medium</code>（2 vCPU・4GB）、余裕を見るなら <code>t4g.large</code>（2 vCPU・8GB）。x86 を選んだなら <code>t3.medium</code> / <code>t3.large</code>。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>キーペア</h4>
+<p>さっき登録した <code>shop</code> を選びます。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>ネットワーク設定（いちばん大事）</h4>
+<p>「セキュリティグループを作成」。<strong>「からの SSH トラフィックを許可」にチェックし、右の選択を「自分の IP」に。</strong>「インターネットからの HTTPS トラフィックを許可」「インターネットからの HTTP トラフィックを許可」は<strong>チェックしません</strong>（公開は Tunnel で、外から入る口は要りません）。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>ストレージ</h4>
+<p><code>30</code> GiB、種類は <code>gp3</code>。「詳細」を開いて「暗号化済み」を「暗号化」に（ディスクを盗まれても読めません）。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>高度な詳細</h4>
+<p>「終了保護」→「有効化」（誤ってサーバーを消せないように）。「メタデータのバージョン」→「V2 のみ (トークンは必須)」。<strong>「メタデータのレスポンスホップ制限」→ <code>2</code></strong>（Docker の中の rclone が、サーバーの役割を使えるように。1 のままだとコンテナの中から届きません）。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>起動して、固定の IP を付ける</h4>
+<p>「インスタンスを起動」。次に EC2 →「Elastic IP」→「Elastic IP アドレスを割り当てる」→ 割り当てたものを選んで「アクション」→「Elastic IP アドレスの関連付け」→ さっきのインスタンス。IP アドレスは、使っていてもいなくても少し料金がかかります。<strong>サーバーを消したら、IP も「解放」します</strong>（残すと料金だけかかり続けます）。</p></li>
+      </ol>
+    </div>
+
+    <div class="flow" id="ssh">
+      <div class="flow-head">
+        <span class="letter">C</span>
+        <h3>SSH で入れるようにする</h3>
+        <p>パソコンに「shop と打てばこのサーバー」という呼び名を登録します。キットのコマンドはこの呼び名で動きます。</p>
+        <div class="keep"><b>Ubuntu のサーバーのユーザー名は <code>ubuntu</code>。</b>最初からパスワードでは入れず、鍵だけで入れる設定になっています。</div>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where pc">パソコン</span>呼び名を書く</h4>
+<pre><span class="c"># ~/.ssh/config に足す（ファイルが無ければ作る）</span>
+Host shop
+  HostName 203.0.113.10   <span class="c"># Elastic IP</span>
+  User ubuntu
+  IdentityFile ~/.ssh/id_ed25519</pre></li>
+        <li><h4><span class="where pc">パソコン</span>入ってみる</h4>
+<pre>ssh shop</pre>
+<p>初回は「この相手で合っているか」と聞かれるので <code>yes</code>。<code>ubuntu@ip-…:~$</code> と出れば入れています。<code>exit</code> で抜けます。</p></li>
+        <li><h4><span class="where srv">サーバー</span>パスワードで入れないことを確かめる</h4>
+<pre>ssh shop 'sudo sshd -T | grep -E "^(passwordauthentication|permitrootlogin) "'</pre>
+<p><code>passwordauthentication no</code> と <code>permitrootlogin without-password</code>（または <code>no</code>）なら大丈夫です。<code>yes</code> と出たら、<a href="server-vps.html#harden">VPS のページの「SSH を固める」</a>と同じ設定を入れます。</p></li>
+        <li><h4><span class="where srv">サーバー</span>OS の自動更新を確かめる</h4>
+<pre>ssh shop 'systemctl is-enabled unattended-upgrades'</pre>
+<p><code>enabled</code> なら、セキュリティ更新は毎日自動で入ります。カーネルの更新は再起動するまで効かないので、月に 1 回、お客さんの少ない時間に <code>ssh shop 'sudo reboot'</code>（お店は自動で立ち上がります）。</p></li>
+      </ol>
+    </div>
+
+    <div class="flow" id="backup">
+      <div class="flow-head">
+        <span class="letter">D</span>
+        <h3>バックアップの置き場（S3）</h3>
+        <p>サーバーの外にバックアップを置きます。<strong>サーバーには鍵を置かず</strong>、サーバーの役割（IAM ロール）に「このバケットに足してよい・読んでよい」とだけ許します。<strong>消す権限は渡しません。</strong>サーバーが乗っ取られても、バックアップは消されません。</p>
+        <div class="keep"><b>古いバックアップは S3 が消す。</b>サーバーには消す権限が無いので、30 日たったら S3 の決まり（ライフサイクル）で消えるようにします。</div>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where eye">ブラウザ</span>バケットを作る</h4>
+<p>S3 →「バケットを作成」。名前は世界で 1 つのもの（例: <code>myshop-backup-7k2p</code>）。リージョンは東京。<strong>「パブリックアクセスをすべてブロック」はオンのまま。</strong>「バケットのバージョニング」→「有効にする」（上書きされても前の版が残ります）。暗号化は既定（SSE-S3）のまま。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>30 日で消える決まりを作る</h4>
+<p>作ったバケット →「管理」→「ライフサイクルルールを作成する」。範囲は「バケット内のすべてのオブジェクトに適用」。「オブジェクトの現行バージョンを有効期限切れにする」→ 30 日、「オブジェクトの非現行バージョンを完全に削除」→ 30 日。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>サーバーの役割（IAM ロール）を作る</h4>
+<p>IAM →「ロール」→「ロールを作成」→「AWS のサービス」→ ユースケース「EC2」→ 許可ポリシーは何も選ばずに次へ → 名前 <code>myshop-server</code> で作成。作ったロール →「許可を追加」→「インラインポリシーを作成」→「JSON」に下を貼り、バケット名を自分のものに替えます。</p>
+<pre>{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow",
+      "Action": ["s3:ListBucket"],
+      "Resource": "arn:aws:s3:::myshop-backup-7k2p" },
+    { "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject"],
+      "Resource": "arn:aws:s3:::myshop-backup-7k2p/*" }
+  ]
+}</pre>
+<p><code>DeleteObject</code> が無いのが要点です（足すだけで、消せません）。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>サーバーに役割を付ける</h4>
+<p>EC2 →「インスタンス」→ <code>myshop</code> を選ぶ →「アクション」→「セキュリティ」→「IAM ロールを変更」→ <code>myshop-server</code>。</p></li>
+        <li><h4><span class="where srv">サーバー</span>rclone を入れて、送り先を登録する</h4>
+<pre>ssh shop 'sudo apt-get install -y unzip &amp;&amp; curl -fsSL https://rclone.org/install.sh | sudo bash'
+ssh shop 'rclone config create s3backup s3 provider=AWS env_auth=true region=ap-northeast-1 no_check_bucket=true'</pre>
+<p><code>env_auth=true</code> が「鍵の代わりにサーバーの役割を使う」という意味です。<code>no_check_bucket=true</code> は、バケットを作ろうとしない設定です（その権限も渡していないため）。</p></li>
+        <li><h4><span class="where pc">パソコン</span>あとは共通の手順で</h4>
+<p><a href="server.html#common">どこでも同じ後半</a>の「バックアップを毎日取る」で <code>bin/setup.sh backup</code> を打ったら、「1) rclone」→ 送り先 <code>s3backup</code> → パス <code>myshop-backup-7k2p/myshop</code> と答えます。</p></li>
+      </ol>
+    </div>
+
+    <div class="flow" id="ses">
+      <div class="flow-head">
+        <span class="letter">E</span>
+        <h3>メールを Amazon SES で送る</h3>
+        <p>ほかの送信サービス（SendGrid・Resend など）を使うなら、この節は飛ばして構いません。SES は安いかわりに、最初は「確認したアドレスにしか送れない」状態（サンドボックス）から始まります。</p>
+        <div class="keep"><b>EC2 からの直接の送信（25 番）は使わない。</b>AWS は最初から 25 番を絞っていて、送れても迷惑メールに入ります。SES の 587 番を使います。</div>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where eye">ブラウザ</span>送り元のドメインを確認する</h4>
+<p>Amazon SES（リージョンは東京）→「ID」→「ID の作成」→「ドメイン」に <code>example.com</code>。「Easy DKIM」のまま作ると、DNS に足す CNAME が 3 つ出ます。Cloudflare の DNS に 3 つとも足します。<strong>プロキシは「DNS のみ」（灰色の雲）に</strong>（オレンジのままだと確認が通りません）。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>本番で使えるように申請する</h4>
+<p>SES の「アカウントダッシュボード」→「本番アクセスをリクエスト」。用途は「トランザクション」、ウェブサイトの URL、どんなメールを送るか（注文の確認・発送の連絡・会員登録の確認）を書きます。通るまで、確認していない相手には届きません。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>SMTP の認証情報を作る</h4>
+<p>SES →「SMTP 設定」→「SMTP 認証情報の作成」。出てきた<strong>SMTP ユーザー名とパスワード</strong>を控えます（IAM のアクセスキーとは別物です）。</p></li>
+        <li><h4><span class="where pc">パソコン</span>キットに入れる</h4>
+<pre>bin/setup.sh mail --remote=shop:/srv/myshop</pre>
+<p>「2) Amazon SES」→ リージョン <code>ap-northeast-1</code> → 控えたユーザー名とパスワード。試しに 1 通送って、届いたものだけを書きます。</p></li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section id="later">
+  <div class="wrap">
+    <h2>必要になったら<em class="k">足すもの</em></h2>
+    <p class="sub">最初はなくても困りません。お店が育ってきたら足します。</p>
+
+    <div class="two faq">
+      <div class="box"><h4>商品画像を S3 と CloudFront から配る</h4><ul>
+        <li>画像用に、バックアップとは別のバケットを作ります（パブリックアクセスはブロックのまま）。</li>
+        <li>CloudFront →「ディストリビューションを作成」→ オリジンにそのバケット →「オリジンアクセス」は「Origin access control settings (recommended)」。表示されるバケットポリシーを、バケットの「アクセス許可」に貼ります。バケットを公開せずに、CloudFront からだけ読めるようになります。</li>
+        <li>ロールのインラインポリシーに、画像のバケットへの <code>ListBucket</code>・<code>PutObject</code>・<code>GetObject</code> を足します。写し方と URL の切り替えは <a href="images.html#howto">商品画像を S3 / R2 から配る</a>。鍵の代わりに <code>RCLONE_CONFIG_IMG_ENV_AUTH=true</code> と <code>PROVIDER=AWS</code>・<code>REGION=ap-northeast-1</code> を書きます。URL は <code>https://dxxxx.cloudfront.net/save_image</code>。</li>
+      </ul></div>
+      <div class="box"><h4>DB を RDS（マネージド DB）にする</h4><ul>
+        <li>バックアップと故障時の切り替えを AWS に任せられます。料金は上がります。</li>
+        <li>エンジンは MariaDB 10.11（いまの DB と同じ種類）。「パブリックアクセス」は<strong>なし</strong>。セキュリティグループは「3306 番を、EC2 のセキュリティグループからだけ」許可します。</li>
+        <li>切り替えは <code>bin/setup.sh db --remote=shop:/srv/myshop</code>（繋がるか試して、いまのデータを写すかを聞きます）。</li>
+      </ul></div>
+      <div class="box"><h4>ディスクごとの控え（スナップショット）</h4><ul>
+        <li>EC2 →「Lifecycle Manager」→ ポリシーを作成 → 対象のディスク、毎日、7 世代。</li>
+        <li>サーバーごと壊れたときに丸ごと戻せます。ただし動いている DB をそのまま撮るので、<strong>お店のデータを戻すのは <code>bin/backup.sh</code> のほうが確実</strong>です。両方あると安心です。</li>
+      </ul></div>
+      <div class="box"><h4>止まったら知らせる</h4><ul>
+        <li>サーバーの故障は、EC2 が自動で別の機械へ移します（自動復旧は最初から有効）。</li>
+        <li>お店が開くかは外から見ます。UptimeRobot などで <code>https://お店のドメイン/</code> を 5 分おきに。</li>
+      </ul></div>
+    </div>
+
+    <div class="two" style="margin-top:28px">
+      <div class="box no"><h3>やらないこと</h3><ul>
+        <li><strong>アクセスキー（<code>AKIA…</code>）をサーバーに置く。</strong>漏れると、そのキーでできることが全部できてしまいます。サーバーにはロールを付けます。</li>
+        <li><strong>セキュリティグループで 22 番を「0.0.0.0/0」（どこからでも）にする。</strong>世界中から総当たりで試されます。自宅の IP が変わったら、ルールのほうを書き換えます。</li>
+        <li><strong>S3 のバケットを公開にする。</strong>バックアップは会員の個人情報そのものです。画像も CloudFront からだけ読ませます。</li>
+      </ul></div>
+    </div>
+
+    <div class="note">
+      <b>次へ</b>
+      <span>SSH で入れて、バックアップの置き場ができたら、<a href="server.html#common">どこでも同じ後半</a>へ進みます（時刻を日本時間に → Docker とファイル → メール → Tunnel → 公開 → バックアップ）。</span>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <h2>ほかの借り先</h2>
+    <div class="nextpages"><a class="nextpage" href="server.html"><span class="tag">本番サーバー</span><h3>全体と<em class="k">守り方</em></h3><p>できあがりの形、7 つの決まり、どこでも同じ後半、公開前の確認。</p></a><a class="nextpage" href="server-vps.html"><span class="tag">VPS</span><h3>VPS で<em class="k">始める</em></h3><p>月額で安く、1 台で足りるお店に。</p></a><a class="nextpage" href="server-gcp.html"><span class="tag">Google Cloud</span><h3>Google Cloud で<em class="k">始める</em></h3><p>Compute Engine・サービスアカウント・Cloud Storage。</p></a></div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>Apache License 2.0。EC-CUBE は対象外で、EC-CUBE 自身のライセンスがそのまま適用されます（EC-CUBE は一切改変していません）。</p>
+    <p><a href="https://github.com/kurozumi/eccube-kit/releases">リリース</a> · <a href="https://github.com/kurozumi/eccube-kit/issues">Issue</a> · <a href="https://github.com/kurozumi/eccube-kit/blob/main/LICENSE">LICENSE</a> · <a href="https://github.com/kurozumi/eccube-kit/security/policy">脆弱性の報告（非公開）</a></p>
+    <p>作った人: Akira Kurozumi（<a href="https://a-zumi.net/">a-zumi.net</a>）· <a href="./#contact">お問い合わせ</a></p>
+    <p>この環境は非公式です。EC-CUBE は株式会社イーシーキューブの登録商標で、同社とは無関係です。</p>
+  </div>
+</footer>
+
+<div class="fab" id="fab" hidden>
+  <div class="fab-menu" id="fab-menu" role="dialog" aria-label="お問い合わせ / Issue">
+    <div class="head">困ったこと、こう動いてほしい<small>どちらも歓迎です。うまく書けなくて構いません。</small></div>
+    <a class="fab-item" href="https://github.com/kurozumi/eccube-kit/issues/new" target="_blank" rel="noopener">
+      <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg></span>
+      <span><b>Issue を書く</b><span>不具合・要望・質問。GitHub で公開の相談</span></span>
+    </a>
+    <a class="fab-item" href="mailto:info@a-zumi.net?subject=eccube-docker%20%E3%81%AE%E7%9B%B8%E8%AB%87">
+      <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></span>
+      <span><b>メールで相談する</b><span>公開できない話、受託の構築・引っ越し</span></span>
+    </a>
+  </div>
+  <button class="fab-btn" id="fab-btn" type="button" aria-expanded="false" aria-controls="fab-menu">
+    <svg class="chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H8l-5 3 1.2-4.2A8 8 0 1 1 21 12z"/></svg>
+    <svg class="x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    <span>お問い合わせ / Issue</span>
+  </button>
+</div>
+<script>
+(function () {
+  var fab = document.getElementById('fab');
+  var btn = document.getElementById('fab-btn');
+  var contact = document.getElementById('contact');
+  if (!fab || !btn) return;
+  fab.hidden = false;
+  var menu = document.getElementById('fab-menu');
+  // 閉じている間はメニューの中に Tab で入れないようにする（見えないリンクにフォーカスが行かない）
+  if (menu) menu.inert = true;
+  function setOpen(v) {
+    if (!v && menu && menu.contains(document.activeElement)) btn.focus();
+    fab.classList.toggle('open', v);
+    btn.setAttribute('aria-expanded', v ? 'true' : 'false');
+    if (menu) menu.inert = !v;
+  }
+  btn.addEventListener('click', function () { setOpen(!fab.classList.contains('open')); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') setOpen(false); });
+  document.addEventListener('click', function (e) { if (!fab.contains(e.target)) setOpen(false); });
+  // 連絡先の節が見えている間は出さない（同じものが二重に見えないように）
+  if (contact && 'IntersectionObserver' in window) {
+    new IntersectionObserver(function (es) {
+      var seen = es[0].isIntersecting;
+      fab.hidden = seen;
+      if (seen) setOpen(false);
+    }, { threshold: 0.15 }).observe(contact);
+  }
+})();
+</script>
+</body>
+</html>
