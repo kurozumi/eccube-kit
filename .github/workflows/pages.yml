@@ -69,17 +69,27 @@ jobs:
           wranglerVersion: '4.158.0'
           command: deploy
 
+      # 外から開けるかは**警告だけ**にする。落とすのは置き換え前のページが返ってきたときだけ
+      # （置き換え漏れは「版を埋める」が配る前に止めている）。
+      # - a-zumi.net のボット対策がデータセンターの IP（GitHub のランナー）に 403 を返す。手元からは 200。
+      #   ゾーン全体の設定なので、これのために弱めない
+      # - Custom Domain の初回は、レコードができる前に引いた「無い」をランナーの DNS が覚えていて
+      #   5 分経っても引けなかった（SOA の負のキャッシュは 1800 秒）
       - name: 届いたか確かめる
         run: |
-          set -eu
-          # Custom Domain の初回は証明書の発行を待つことがある
-          for i in $(seq 1 30); do
-            if curl -fsS "${SITE_URL}/" -o /tmp/index.html; then break; fi
-            sleep 10
+          set -u
+          for page in / /guide; do
+            code="$(curl -sS -o /tmp/page.html -w '%{http_code}' "${SITE_URL}${page}" 2>/tmp/curl.err)" || true
+            if [ "$code" = 200 ]; then
+              if grep -q '__TAG__\|__VER__' /tmp/page.html; then
+                echo "::error::置き換え前のページが出ている: ${SITE_URL}${page}"
+                exit 1
+              fi
+              echo "OK: ${SITE_URL}${page}"
+            else
+              echo "::warning::${SITE_URL}${page} を外から確かめられなかった（HTTP ${code:-なし} $(cat /tmp/curl.err)）。ブラウザで開いて確かめる"
+            fi
           done
-          grep -q '__TAG__\|__VER__' /tmp/index.html && { echo "置き換え前のページが出ている" >&2; exit 1; } || true
-          curl -fsS -o /dev/null "${SITE_URL}/guide"
-          echo "OK: ${SITE_URL}/"
 
   # 古い URL（GitHub Pages）を新しい URL へ送るだけのページを配る
   github-pages-redirect:
