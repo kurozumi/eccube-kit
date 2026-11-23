@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Google Cloud で始める | EC-CUBE 運用キット</title>
+<meta name="description" content="EC-CUBE 4 の本番を Google Cloud に。予算の通知、Compute Engine、最初から開いている SSH を閉じる、サービスアカウントで Cloud Storage へのバックアップまで。">
+<meta property="og:title" content="EC-CUBE 運用キット — Google Cloud で始める">
+<meta property="og:description" content="EC-CUBE 4 の本番を Google Cloud に。予算の通知、Compute Engine、最初から開いている SSH を閉じる、サービスアカウントで Cloud Storage へのバックアップまで。">
+<meta property="og:type" content="website">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#E8621C">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@500;700;900&family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topnav"><div class="wrap"><a class="brand" href="./"><img src="favicon.svg" alt="">EC-CUBE 運用キット</a><nav aria-label="ページ"><a href="./">トップ</a><a href="guide.html">はじめる・上げる</a><a href="ops.html">更新と反映</a><a href="server.html" aria-current="page">本番サーバー</a><a href="scale.html">大規模アクセス</a><a href="https://github.com/kurozumi/eccube-kit">GitHub</a></nav></div></div>
+
+<header class="pagehead">
+  <div class="wrap">
+    <p class="eyebrow">eccube-docker · __TAG__ · <a href="server.html">本番サーバー</a></p>
+    <h1>Google Cloud で始める</h1>
+    <p class="lede">プロジェクトと料金の通知から、Compute Engine のサーバーを作り、最初から開いている SSH を閉じ、鍵を置かずにバックアップを Cloud Storage へ送るところまで。終わったら <a href="server.html#common">どこでも同じ後半</a> へ進みます。</p>
+  </div>
+</header>
+
+<section id="words">
+  <div class="wrap">
+    <h2>先に知っておく<em class="k">言葉</em></h2>
+    <div class="terms">
+      <div class="term"><p class="tag">入れ物</p><h3>プロジェクト</h3><p>サーバーやファイルの置き場をまとめる単位。料金もプロジェクトごとに数えます。お店ごとに 1 つ作ります。</p></div>
+      <div class="term"><p class="tag">サーバー</p><h3>Compute Engine と VM</h3><p>Google Cloud で借りるサーバー。1 台を「VM インスタンス」と呼びます。</p></div>
+      <div class="term"><p class="tag">ファイアウォール</p><h3>ファイアウォール ルール</h3><p>サーバーに「誰が・どの番号の口から」入れるかの決まり。<strong>最初から入っているルールが SSH を世界中に開けている</strong>ので、閉じます。</p></div>
+      <div class="term"><p class="tag">ファイルの置き場</p><h3>Cloud Storage とバケット</h3><p>ファイルを置く場所。1 つの置き場を「バケット」と呼びます。名前は世界中で重ならないものにします。</p></div>
+      <div class="term"><p class="tag">権限</p><h3>サービス アカウント</h3><p>サーバーに付ける「役割」。役割に「このバケットに書いてよい」と決めておくと、<strong>鍵のファイルを置かずに</strong>サーバーからバケットへ書けます。</p></div>
+      <div class="term"><p class="tag">場所</p><h3>リージョン</h3><p>サーバーを置く地域。日本のお店なら <strong>asia-northeast1（東京）</strong>。作るたびに選ぶので、毎回確かめます。</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="steps">
+  <div class="wrap">
+    <h2>サーバーを<em class="k">作る</em>まで</h2>
+    <p class="sub">「サーバー」の札は、サーバーに効くコマンドの印です。<code>ssh shop '…'</code> の形のものは、<strong>パソコンのターミナルで</strong>打ちます。画面の項目名は 2026 年 11 月の日本語の管理画面（コンソール）のものです。名前が変わっていたら、<strong>何をしたいか</strong>で探してください。</p>
+
+    <div class="flow" id="account">
+      <div class="flow-head">
+        <span class="letter">A</span>
+        <h3>アカウントとプロジェクト</h3>
+        <p>サーバーより先に、Google アカウントとお金の見張りを固めます。</p>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where eye">ブラウザ</span>Google アカウントに二段階認証</h4>
+<p>myaccount.google.com →「セキュリティ」→「2 段階認証プロセス」。パスキーか認証アプリを登録します。このアカウントが乗っ取られると、サーバーごと消されます。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>お店用のプロジェクトを作る</h4>
+<p>console.cloud.google.com → 上のプロジェクト名 →「新しいプロジェクト」→ 名前 <code>myshop</code>。以後、画面の上のプロジェクト名が <code>myshop</code> になっているのを確かめてから操作します。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>料金の通知を設定する</h4>
+<p>「お支払い」→「予算とアラート」→「予算を作成」。対象のプロジェクト、金額（例: 月 10,000 円）、50%・90%・100% で通知。<strong>思ったより高いと気づけるのは、ここだけです。</strong></p></li>
+        <li><h4><span class="where eye">ブラウザ</span>サーバーの役割（サービス アカウント）を作る</h4>
+<p>「IAM と管理」→「サービス アカウント」→「サービス アカウントを作成」→ 名前 <code>myshop-server</code>。「このサービス アカウントにプロジェクトへのアクセスを許可する」は<strong>何も選ばずに</strong>完了。権限はあとでバケットにだけ付けます。</p></li>
+      </ol>
+    </div>
+
+    <div class="flow" id="vm">
+      <div class="flow-head">
+        <span class="letter">B</span>
+        <h3>VM を作る</h3>
+        <p>Compute Engine →「VM インスタンス」（初回は「有効にする」を押して数分待ちます）→「インスタンスを作成」。左の項目を上から順に埋めます。</p>
+        <p>大きさの目安: <strong>最低 2 vCPU・メモリ 4GB</strong>（PHP が 20 本で約 1.6GB、キャッシュの組み立てに 1GB、DB に 0.5GB を使います）。</p>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where eye">ブラウザ</span>マシンの構成</h4>
+<p>名前 <code>myshop</code>、リージョン <code>asia-northeast1（東京）</code>、ゾーンはどれでも。シリーズ <code>E2</code>、マシンタイプ <code>e2-medium</code>（2 vCPU・4GB）。余裕を見るなら <code>e2-standard-2</code>（2 vCPU・8GB）。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>OS とストレージ</h4>
+<p>「変更」→ オペレーティング システム <strong>Ubuntu</strong>、バージョン「Ubuntu 24.04 LTS」（x86/64）。ディスクの種類「バランス永続ディスク」、サイズ <code>30</code> GB。ディスクは最初から暗号化されています。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>ネットワーキング</h4>
+<p>「HTTP トラフィックを許可する」「HTTPS トラフィックを許可する」は<strong>チェックしません</strong>（公開は Tunnel で、外から入る口は要りません）。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>セキュリティ</h4>
+<p>「Shielded VM」→「セキュアブートをオンにする」にチェック。<br>「ID と API へのアクセス」→ サービス アカウント <code>myshop-server</code>、アクセス スコープ「<strong>すべての Cloud API に完全アクセス権を許可</strong>」。<br>「アクセスの管理」→「手動で生成した SSH 認証鍵を追加」→「項目を追加」→ <a href="server.html#sshkey">作った公開鍵</a>（<code>ssh-ed25519 AAAA… shop</code> の 1 行）を貼ります。最後の <code>shop</code> がログインのユーザー名になります。</p>
+<p><strong>アクセス スコープを既定のままにしない。</strong>既定は Cloud Storage を「読み取りのみ」に絞るので、あとでバケットに権限を付けても書けず、バックアップが送れません。「完全アクセス」にしても、できることはサービス アカウントに付けた権限（このあとバケットにだけ付けるもの）に限られます。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>詳細オプション</h4>
+<p>「削除からの保護を有効にする」にチェック（誤ってサーバーを消せないように）。「作成」。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>IP アドレスを固定する</h4>
+<p>「VPC ネットワーク」→「IP アドレス」→ <code>myshop</code> の外部アドレスの行 →「静的アドレスに昇格」。しないと、止めて起動し直すたびに IP が変わります。<strong>サーバーを消したら、この IP も解放します</strong>（使っていない静的 IP にも料金がかかります）。</p></li>
+      </ol>
+    </div>
+
+    <div class="flow" id="firewall">
+      <div class="flow-head">
+        <span class="letter">C</span>
+        <h3>最初から開いている SSH を閉じる</h3>
+        <p>新しいプロジェクトの <code>default</code> ネットワークには、最初からルールが 4 つ入っています。そのうち <code>default-allow-ssh</code> は<strong>22 番を世界中（0.0.0.0/0）に開けています。</strong>あなたの IP からだけに替えます。</p>
+        <div class="keep"><b>先に自分のルールを足してから、古いルールを消す。</b>逆にすると、その間あなたも入れなくなります（入れなくなっても、ルールを足し直せば戻ります）。</div>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where pc">パソコン</span>自分の IP アドレスを調べる</h4>
+<pre>curl -s https://api.ipify.org</pre>
+<p><code>198.51.100.23</code> のような数字が出ます。自宅やお店の回線の IP です（ときどき変わります）。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>自分からだけ入れるルールを足す</h4>
+<p>「VPC ネットワーク」→「ファイアウォール」→「ファイアウォール ルールを作成」。名前 <code>allow-ssh-from-me</code>、ネットワーク <code>default</code>、トラフィックの方向「上り」、一致したときのアクション「許可」、ターゲット「ネットワーク上のすべてのインスタンス」、ソース IPv4 範囲 <code>198.51.100.23/32</code>（調べた IP の後ろに <code>/32</code>）、プロトコルとポート「TCP」<code>22</code>。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>世界中に開いているルールを消す</h4>
+<p>同じ一覧で <code>default-allow-ssh</code> と <code>default-allow-rdp</code>（Windows 用の 3389 番。要りません）にチェック →「削除」。<code>default-allow-icmp</code>（ping）と <code>default-allow-internal</code>（ネットワークの中どうし）は残して構いません。</p></li>
+        <li><h4><span class="where pc">パソコン</span>IP が変わったら</h4>
+<p>家の回線が変わって入れなくなったら、<code>allow-ssh-from-me</code> を開いてソース IPv4 範囲を新しい IP に書き換えます。</p></li>
+      </ol>
+    </div>
+
+    <div class="flow" id="ssh">
+      <div class="flow-head">
+        <span class="letter">D</span>
+        <h3>SSH で入れるようにする</h3>
+        <p>パソコンに「shop と打てばこのサーバー」という呼び名を登録します。キットのコマンドはこの呼び名で動きます。</p>
+        <div class="keep"><b>入れないときは OS Login を疑う。</b>会社の Google Workspace などで「OS Login」が有効だと、貼った公開鍵は使われません。プロジェクトの「メタデータ」で <code>enable-oslogin</code> が <code>TRUE</code> になっていないかを見ます。</div>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where pc">パソコン</span>呼び名を書く</h4>
+<pre><span class="c"># ~/.ssh/config に足す（ファイルが無ければ作る）</span>
+Host shop
+  HostName 203.0.113.10   <span class="c"># 固定した外部 IP</span>
+  User shop               <span class="c"># 公開鍵の最後に付けた名前</span>
+  IdentityFile ~/.ssh/id_ed25519</pre></li>
+        <li><h4><span class="where pc">パソコン</span>入ってみる</h4>
+<pre>ssh shop</pre>
+<p>初回は「この相手で合っているか」と聞かれるので <code>yes</code>。<code>shop@myshop:~$</code> と出れば入れています。<strong><code>exit</code> で抜けて、パソコンに戻ります</strong>（このあとのコマンドはパソコンで打ちます）。</p></li>
+        <li><h4><span class="where srv">サーバー</span>パスワードで入れないことを確かめる</h4>
+<pre>ssh shop 'sudo sshd -T | grep -E "^(passwordauthentication|permitrootlogin) "'</pre>
+<p><code>passwordauthentication no</code> と <code>permitrootlogin without-password</code>（または <code>no</code>）なら大丈夫です。<code>yes</code> と出たら、<a href="server-vps.html#harden">VPS のページの「SSH を固める」</a>と同じ設定を入れます。</p></li>
+        <li><h4><span class="where srv">サーバー</span>OS の自動更新を確かめる</h4>
+<pre>ssh shop 'apt-config dump | grep -E "APT::Periodic::(Update-Package-Lists|Unattended-Upgrade) "'
+ssh shop 'systemctl is-active apt-daily.timer apt-daily-upgrade.timer'</pre>
+<p>1 行目の 2 つがどちらも <code>"1"</code>、2 行目が <code>active</code> 2 つなら、セキュリティ更新は毎日自動で入ります。違っていたら <code>ssh -t shop 'sudo dpkg-reconfigure -plow unattended-upgrades'</code>（「はい」）と <code>ssh shop 'sudo systemctl enable --now apt-daily.timer apt-daily-upgrade.timer'</code>。カーネルの更新は再起動するまで効かないので、月に 1 回、お客さんの少ない時間に <code>ssh shop 'sudo reboot'</code>（お店は自動で立ち上がります）。</p></li>
+      </ol>
+    </div>
+
+    <div class="flow" id="backup">
+      <div class="flow-head">
+        <span class="letter">E</span>
+        <h3>バックアップの置き場（Cloud Storage）</h3>
+        <p>サーバーの外にバックアップを置きます。<strong>サーバーには鍵を置かず</strong>、サービス アカウントに「このバケットに足してよい・読んでよい」とだけ許します。<strong>消す・上書きする権限は渡しません。</strong>サーバーが乗っ取られても、バックアップは消されません。</p>
+        <div class="keep"><b>古いバックアップはバケットが消す。</b>サーバーには消す権限が無いので、30 日たったらバケットの決まり（ライフサイクル）で消えるようにします。</div>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where eye">ブラウザ</span>バケットを作る</h4>
+<p>「Cloud Storage」→「バケット」→「作成」。名前は世界で 1 つのもの（例: <code>myshop-backup-7k2p</code>）。ロケーション タイプ「Region」→ <code>asia-northeast1（東京）</code>。ストレージ クラス「Standard」。<strong>「このバケットに対する公開アクセス禁止を適用する」にチェック</strong>、アクセス制御「均一」。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>30 日で消える決まりを作る</h4>
+<p>作ったバケット →「ライフサイクル」→「ルールを追加」→ アクション「オブジェクトを削除する」→ 条件「経過日数」30。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>サービス アカウントに権限を付ける</h4>
+<p>バケット →「権限」→「アクセス権を付与」→ 新しいプリンシパルに <code>myshop-server@&lt;プロジェクト ID&gt;.iam.gserviceaccount.com</code>。ロールは 2 つ:「<strong>Storage オブジェクト作成者</strong>」（足せる）と「<strong>Storage オブジェクト閲覧者</strong>」（一覧と読み取り）。「管理者」や「ユーザー」は付けません（消せてしまいます）。</p></li>
+        <li><h4><span class="where srv">サーバー</span>rclone を入れて、送り先を登録する</h4>
+<pre>ssh shop 'sudo apt-get install -y unzip &amp;&amp; curl -fsSL https://rclone.org/install.sh | sudo bash'
+ssh shop 'rclone config create gcsbackup "google cloud storage" env_auth=true bucket_policy_only=true'</pre>
+<p><code>env_auth=true</code> が「鍵の代わりにサーバーのサービス アカウントを使う」という意味です。<code>bucket_policy_only=true</code> は、アクセス制御を「均一」にしたバケットに要る設定です。</p></li>
+        <li><h4><span class="where pc">パソコン</span>あとは共通の手順で</h4>
+<p><a href="server.html#common">どこでも同じ後半</a>の「バックアップを毎日取る」で <code>bin/setup.sh backup</code> を打ったら、「1) rclone」→ 送り先 <code>gcsbackup</code> → パス <code>myshop-backup-7k2p/myshop</code> と答えます。</p></li>
+      </ol>
+    </div>
+
+    <div class="flow" id="mail">
+      <div class="flow-head">
+        <span class="letter">F</span>
+        <h3>メールの送り方</h3>
+        <p><strong>Google Cloud は、サーバーからのメールの 25 番を例外なく塞いでいます。</strong>注文メールは外の送信サービスから、587 番で送ります。</p>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where eye">ブラウザ</span>送信サービスを選ぶ</h4>
+<p>SendGrid・Resend・Amazon SES、または Google Workspace を使っているならその SMTP。送り元のドメインを、そのサービスの手順で確認（SPF / DKIM の DNS レコードを Cloudflare に足す。<strong>プロキシは「DNS のみ」</strong>）しておきます。</p></li>
+        <li><h4><span class="where pc">パソコン</span>キットに入れる</h4>
+<pre>bin/setup.sh mail --remote=shop:/srv/myshop</pre>
+<p>サービスを選んで質問に答えると、試しに 1 通送ります。届いたものだけを書きます。</p></li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section id="later">
+  <div class="wrap">
+    <h2>必要になったら<em class="k">足すもの</em></h2>
+    <p class="sub">最初はなくても困りません。お店が育ってきたら足します。</p>
+
+    <div class="two faq">
+      <div class="box"><h4>商品画像をバケットから配る</h4><ul>
+        <li>Google Cloud だけで配るなら、画像用のバケットを公開にして、前に「外部アプリケーション ロードバランサ」と Cloud CDN を置きます。ロードバランサには、使っていなくても毎月の固定料金がかかります。</li>
+        <li><strong>Cloudflare をもう使っているなら、画像は Cloudflare R2 に置くほうが簡単で安上がりです</strong>（配信の転送量がかかりません）。手順は <a href="images.html#howto">商品画像を S3 / R2 から配る</a>。</li>
+      </ul></div>
+      <div class="box"><h4>DB を Cloud SQL（マネージド DB）にする</h4><ul>
+        <li>バックアップと故障時の切り替えを Google に任せられます。料金は上がります。</li>
+        <li><strong>Cloud SQL には MariaDB がありません。</strong>MySQL 8 か PostgreSQL です。いまの DB（MariaDB）から MySQL 8 へ写すときは、先に検証環境で試してください。「パブリック IP」は使わず「プライベート IP」で繋ぎます。</li>
+        <li>切り替えは <code>bin/setup.sh db --remote=shop:/srv/myshop</code>（繋がるか試して、いまのデータを写すかを聞きます）。</li>
+      </ul></div>
+      <div class="box"><h4>ディスクごとの控え（スナップショット）</h4><ul>
+        <li>Compute Engine →「スナップショット」→「スナップショット スケジュールを作成」（毎日、7 日保持）→ ディスクの「編集」でそのスケジュールを付けます。</li>
+        <li>サーバーごと壊れたときに丸ごと戻せます。<strong>お店のデータを戻すのは <code>bin/backup.sh</code> のほうが確実</strong>です。両方あると安心です。</li>
+      </ul></div>
+      <div class="box"><h4>止まったら知らせる</h4><ul>
+        <li>Google 側の機械の入れ替えでは、VM は止まらずに移されます（既定の設定）。</li>
+        <li>お店が開くかは外から見ます。Cloud Monitoring の「稼働時間チェック」か UptimeRobot で <code>https://お店のドメイン/</code> を 5 分おきに。</li>
+      </ul></div>
+    </div>
+
+    <div class="two" style="margin-top:28px">
+      <div class="box no"><h3>やらないこと</h3><ul>
+        <li><strong>サービス アカウントの鍵（JSON ファイル）を作ってサーバーに置く。</strong>漏れると、その鍵でできることが全部できてしまいます。VM にサービス アカウントを付ければ要りません。</li>
+        <li><strong><code>default-allow-ssh</code> を残す。</strong>世界中から総当たりで試されます。</li>
+        <li><strong>バックアップのバケットを公開にする。</strong>会員の個人情報そのものです。</li>
+        <li><strong>サービス アカウントにプロジェクト全体の「編集者」を付ける。</strong>付けるのはバケットへの 2 つのロールだけです。</li>
+      </ul></div>
+    </div>
+
+    <div class="note">
+      <b>次へ</b>
+      <span>SSH で入れて、バックアップの置き場ができたら、<a href="server.html#common">どこでも同じ後半</a>へ進みます（時刻を日本時間に → Docker とファイル → メール → Tunnel → 公開 → バックアップ）。</span>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <h2>ほかの借り先</h2>
+    <div class="nextpages"><a class="nextpage" href="server.html"><span class="tag">本番サーバー</span><h3>全体と<em class="k">守り方</em></h3><p>できあがりの形、7 つの決まり、どこでも同じ後半、公開前の確認。</p></a><a class="nextpage" href="server-vps.html"><span class="tag">VPS</span><h3>VPS で<em class="k">始める</em></h3><p>月額で安く、1 台で足りるお店に。</p></a><a class="nextpage" href="server-aws.html"><span class="tag">AWS</span><h3>AWS で<em class="k">始める</em></h3><p>EC2・IAM ロール・S3・SES。</p></a></div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>Apache License 2.0。EC-CUBE は対象外で、EC-CUBE 自身のライセンスがそのまま適用されます（EC-CUBE は一切改変していません）。</p>
+    <p><a href="https://github.com/kurozumi/eccube-kit/releases">リリース</a> · <a href="https://github.com/kurozumi/eccube-kit/issues">Issue</a> · <a href="https://github.com/kurozumi/eccube-kit/blob/main/LICENSE">LICENSE</a> · <a href="https://github.com/kurozumi/eccube-kit/security/policy">脆弱性の報告（非公開）</a></p>
+    <p>作った人: Akira Kurozumi（<a href="https://a-zumi.net/">a-zumi.net</a>）· <a href="./#contact">お問い合わせ</a></p>
+    <p>この環境は非公式です。EC-CUBE は株式会社イーシーキューブの登録商標で、同社とは無関係です。</p>
+  </div>
+</footer>
+
+<div class="fab" id="fab" hidden>
+  <div class="fab-menu" id="fab-menu" role="dialog" aria-label="お問い合わせ / Issue">
+    <div class="head">困ったこと、こう動いてほしい<small>どちらも歓迎です。うまく書けなくて構いません。</small></div>
+    <a class="fab-item" href="https://github.com/kurozumi/eccube-kit/issues/new" target="_blank" rel="noopener">
+      <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg></span>
+      <span><b>Issue を書く</b><span>不具合・要望・質問。GitHub で公開の相談</span></span>
+    </a>
+    <a class="fab-item" href="mailto:info@a-zumi.net?subject=eccube-docker%20%E3%81%AE%E7%9B%B8%E8%AB%87">
+      <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></span>
+      <span><b>メールで相談する</b><span>公開できない話、受託の構築・引っ越し</span></span>
+    </a>
+  </div>
+  <button class="fab-btn" id="fab-btn" type="button" aria-expanded="false" aria-controls="fab-menu">
+    <svg class="chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H8l-5 3 1.2-4.2A8 8 0 1 1 21 12z"/></svg>
+    <svg class="x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    <span>お問い合わせ / Issue</span>
+  </button>
+</div>
+<script>
+(function () {
+  var fab = document.getElementById('fab');
+  var btn = document.getElementById('fab-btn');
+  var contact = document.getElementById('contact');
+  if (!fab || !btn) return;
+  fab.hidden = false;
+  var menu = document.getElementById('fab-menu');
+  // 閉じている間はメニューの中に Tab で入れないようにする（見えないリンクにフォーカスが行かない）
+  if (menu) menu.inert = true;
+  function setOpen(v) {
+    if (!v && menu && menu.contains(document.activeElement)) btn.focus();
+    fab.classList.toggle('open', v);
+    btn.setAttribute('aria-expanded', v ? 'true' : 'false');
+    if (menu) menu.inert = !v;
+  }
+  btn.addEventListener('click', function () { setOpen(!fab.classList.contains('open')); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') setOpen(false); });
+  document.addEventListener('click', function (e) { if (!fab.contains(e.target)) setOpen(false); });
+  // 連絡先の節が見えている間は出さない（同じものが二重に見えないように）
+  if (contact && 'IntersectionObserver' in window) {
+    new IntersectionObserver(function (es) {
+      var seen = es[0].isIntersecting;
+      fab.hidden = seen;
+      if (seen) setOpen(false);
+    }, { threshold: 0.15 }).observe(contact);
+  }
+})();
+</script>
+</body>
+</html>

@@ -16,8 +16,12 @@ bin/setup.sh mail --remote=user@host:/srv/myshop   # メール（先に 1 通試
 bin/publish.sh --remote=user@host:/srv/myshop      # 公開
 ```
 
+サーバーを借りるところ（AWS・Google Cloud・VPS の画面の操作、SSH とファイアウォールの固め方、鍵を置かない
+バックアップの置き場）は、紹介サイトの [本番サーバーを用意する](https://eccube-kit.a-zumi.net/server) に初めての人向けに書いてある。
+
 `bootstrap-server.sh` は Ubuntu / Debian の VPS を想定（Docker は get.docker.com の手順で入れる。
-sudo が使えること）。**サーバーに git も GitHub の鍵も置かない。** 店のファイルは手元から rsync で
+**パスワード無しで** sudo が使えること。SSH 越しに打つので、パスワードを聞かれると止まる。AWS・Google Cloud の
+既定のユーザーはそうなっている。VPS で `adduser` したユーザーは `/etc/sudoers.d/` に `NOPASSWD` を足す）。**サーバーに git も GitHub の鍵も置かない。** 店のファイルは手元から rsync で
 送り、以後の反映も `bin/deploy.sh --remote=…` が手元から送る（**push モード**。サーバーに `.git` が
 あれば今までどおり向こうで `git pull` する **pull モード**。`--push` / `--pull` で強制できる）。
 push で上書きされたファイルはサーバーの `var/deploy-prev/<日時>/` に残る。

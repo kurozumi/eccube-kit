@@ -19,7 +19,7 @@
 </head>
 <body>
 
-<div class="topnav"><div class="wrap"><a class="brand" href="./"><img src="favicon.svg" alt="">EC-CUBE 運用キット</a><nav aria-label="ページ"><a href="./">トップ</a><a href="guide.html" aria-current="page">はじめる・上げる</a><a href="ops.html">更新と反映</a><a href="scale.html">大規模アクセス</a><a href="https://github.com/kurozumi/eccube-kit">GitHub</a></nav></div></div>
+<div class="topnav"><div class="wrap"><a class="brand" href="./"><img src="favicon.svg" alt="">EC-CUBE 運用キット</a><nav aria-label="ページ"><a href="./">トップ</a><a href="guide.html" aria-current="page">はじめる・上げる</a><a href="ops.html">更新と反映</a><a href="server.html">本番サーバー</a><a href="scale.html">大規模アクセス</a><a href="https://github.com/kurozumi/eccube-kit">GitHub</a></nav></div></div>
 
 <header class="pagehead">
   <div class="wrap">
@@ -104,7 +104,7 @@ gh repo create myshop --private --source=. --push</pre></li>
 <p>数十秒で終わり、URL（<code>http://localhost:8080/</code>）と管理画面のログイン情報が出ます。<code>4.3</code> が EC-CUBE の版、<code>php8.3</code> が PHP の版です。</p></li>
         <li><h4><span class="where srv">サーバー</span>サーバーを整える（パソコンから打つ）</h4>
 <pre>bin/bootstrap-server.sh user@サーバー /srv/myshop</pre>
-<p>Docker を入れ、お店のファイルを送ります。サーバーは SSH で入れるようにしておくだけ。</p></li>
+<p>Docker を入れ、お店のファイルを送ります。サーバーは SSH で入れるようにしておくだけ。サーバーの借り方と守り方は <a href="server.html">本番サーバーを用意する</a>（AWS・Google Cloud・VPS）。</p></li>
         <li><h4><span class="where srv">サーバー</span>メールと公開の設定（パソコンから打つ）</h4>
 <pre>bin/setup.sh mail   --remote=user@サーバー:/srv/myshop
 bin/setup.sh tunnel --remote=user@サーバー:/srv/myshop</pre>

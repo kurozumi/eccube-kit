@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>本番サーバーを用意する | EC-CUBE 運用キット</title>
+<meta name="description" content="サーバーを借りてから公開・毎日のバックアップまで。AWS・Google Cloud・VPS で共通の守り方（SSH・ファイアウォール・鍵・暗号化）と手順。">
+<meta property="og:title" content="EC-CUBE 運用キット — 本番サーバーを用意する">
+<meta property="og:description" content="サーバーを借りてから公開・毎日のバックアップまで。AWS・Google Cloud・VPS で共通の守り方（SSH・ファイアウォール・鍵・暗号化）と手順。">
+<meta property="og:type" content="website">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#E8621C">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@500;700;900&family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topnav"><div class="wrap"><a class="brand" href="./"><img src="favicon.svg" alt="">EC-CUBE 運用キット</a><nav aria-label="ページ"><a href="./">トップ</a><a href="guide.html">はじめる・上げる</a><a href="ops.html">更新と反映</a><a href="server.html" aria-current="page">本番サーバー</a><a href="scale.html">大規模アクセス</a><a href="https://github.com/kurozumi/eccube-kit">GitHub</a></nav></div></div>
+
+<header class="pagehead">
+  <div class="wrap">
+    <p class="eyebrow">eccube-docker · __TAG__</p>
+    <h1>本番サーバーを用意する</h1>
+    <p class="lede">サーバーを借りるところから、お店を公開して毎日のバックアップが回るところまで。AWS・Google Cloud・VPS のどれでも、守り方の決まりと後半の手順は同じです。このページで全体をつかんでから、借りる先のページへ進んでください。</p>
+  </div>
+</header>
+
+<section id="map">
+  <div class="wrap">
+    <h2>できあがりの<em class="k">形</em></h2>
+    <p class="sub">お客さんの通り道と、サーバーの外に置くものです。サーバーには<strong>外から入る口を 1 つも開けません</strong>（SSH を除く）。お客さんは Cloudflare を通って、サーバーが内側から張ったトンネルで届きます。</p>
+
+    <ol class="layers">
+      <li class="layer">
+        <div class="lname"><span class="lstep">1</span>Cloudflare<small>入口</small></div>
+        <ul>
+          <li><strong>ドメインの管理（DNS）と HTTPS の証明書。</strong>お客さんのブラウザはここに繋がります。</li>
+          <li><strong>Tunnel:</strong> サーバーのほうから Cloudflare へ繋ぎに行く道。サーバーの 80 / 443 番を開けずに公開できます。サーバーの IP アドレスが知られても、そこからお店には入れません。</li>
+          <li>画像・CSS・JS をお客さんの近くから配る（CDN）。</li>
+        </ul>
+      </li>
+      <li class="layer">
+        <div class="lname"><span class="lstep">2</span>サーバー<small>借りるところ</small></div>
+        <ul>
+          <li><strong>Docker の中でお店が動く</strong>（nginx・EC-CUBE・DB・Redis）。DB と Redis は外から届かない網の中にあります。</li>
+          <li>外から入れるのは <strong>SSH（22 番）だけ</strong>。あなたのパソコンから、鍵を使って入ります。</li>
+        </ul>
+      </li>
+      <li class="layer">
+        <div class="lname"><span class="lstep">3</span>サーバーの外<small>別の場所に置くもの</small></div>
+        <ul>
+          <li><strong>バックアップの置き場</strong>（S3・Cloud Storage・R2 など）。サーバーごと失っても、ここから戻せます。暗号化して送ります。</li>
+          <li><strong>メールの送信サービス</strong>（SendGrid・Amazon SES など）。注文メールはここから送ります。サーバーから直接は送りません。</li>
+          <li>必要になったら: 商品画像の置き場（<a href="images.html">S3 / R2 から配る</a>）、マネージド DB。</li>
+        </ul>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section id="choose">
+  <div class="wrap">
+    <h2>どこで<em class="k">借りるか</em></h2>
+    <p class="sub">迷ったら VPS から始めてください。お店が大きくなってからクラウドへ引っ越すこともできます（<code>bin/backup.sh</code> と <code>bin/restore.sh</code> で、データごと移せます）。</p>
+
+    <div class="tablewrap">
+      <table class="stack">
+        <tr><th>借り先</th><th>向いているお店</th><th>料金の決まり方</th><th>難しさ</th></tr>
+        <tr><td><strong>VPS</strong><br><small>さくらの VPS・ConoHa VPS・Xserver VPS など</small></td><td data-label="向いているお店">1 台で足りるお店。まずはここから</td><td data-label="料金の決まり方">月額で決まっていて、いちばん安い</td><td data-label="難しさ">いちばんやさしい。ただし SSH の守りは自分で固める</td></tr>
+        <tr><td><strong>AWS</strong></td><td data-label="向いているお店">あとで DB をマネージドにする・台数を増やす予定がある</td><td data-label="料金の決まり方">使った分だけ。サーバー・ディスク・転送量・固定 IP を別々に数える</td><td data-label="難しさ">画面の項目が多い。最初の設定を間違えると高くつく</td></tr>
+        <tr><td><strong>Google Cloud</strong></td><td data-label="向いているお店">AWS と同じ。Google Workspace をもう使っている</td><td data-label="料金の決まり方">使った分だけ（AWS と同じ考え方）</td><td data-label="難しさ">AWS と同じくらい。最初から SSH が世界中に開いているので閉じる</td></tr>
+      </table>
+    </div>
+
+    <div class="nextpages" style="margin-top:28px"><a class="nextpage" href="server-vps.html"><span class="tag">VPS</span><h3>VPS で<em class="k">始める</em></h3><p>注文するときの選び方、最初のログイン、SSH の守りを自分で固める、ファイアウォール、自動更新、R2 へのバックアップ。</p></a><a class="nextpage" href="server-aws.html"><span class="tag">AWS</span><h3>AWS で<em class="k">始める</em></h3><p>アカウントの守り、EC2、セキュリティグループ、鍵を置かないバックアップ（IAM ロール）、SES のメール、S3 と CloudFront の画像。</p></a><a class="nextpage" href="server-gcp.html"><span class="tag">Google Cloud</span><h3>Google Cloud で<em class="k">始める</em></h3><p>プロジェクトと予算の通知、Compute Engine、最初から開いている SSH を閉じる、サービスアカウント、Cloud Storage へのバックアップ。</p></a></div>
+  </div>
+</section>
+
+<section id="prepare">
+  <div class="wrap">
+    <h2>始める前に<em class="k">用意するもの</em></h2>
+    <p class="sub">サーバーを借りる前に、次のものをそろえておきます。どれも無料か、すぐ用意できるものです。</p>
+
+    <div class="terms">
+      <div class="term"><p class="tag">ドメイン</p><h3>Cloudflare に置いたドメイン</h3><p>お店の住所（<code>shop.example.com</code> など）。ドメインを買ったところで、ネームサーバーを Cloudflare に変えておきます（Cloudflare の無料プランで足ります）。</p></div>
+      <div class="term"><p class="tag">コードの置き場</p><h3>GitHub の非公開リポジトリ</h3><p>お店のコードと設定の保存先。<strong>二段階認証を必ず有効に。</strong>ここを乗っ取られると、本番に何でも出せてしまいます。</p></div>
+      <div class="term"><p class="tag">作業する場所</p><h3>あなたのパソコン</h3><p>Mac か、Windows なら WSL2（Ubuntu）。サーバーへの作業はほとんど、パソコンから打つコマンドで済みます。<a href="guide.html#start">パソコンでお店を動かす</a>ところまで先に済ませておきます。</p></div>
+      <div class="term"><p class="tag">秘密の控え</p><h3>パスワードマネージャ</h3><p>1Password・Bitwarden など。サーバーの <code>.env</code>、バックアップの暗号化の鍵、各サービスの復旧コードを控えます。<strong>ここに無いものは、失くしたら二度と戻りません。</strong></p></div>
+      <div class="term"><p class="tag">メール</p><h3>メールの送信サービス</h3><p>SendGrid・Amazon SES・Resend など。注文メールの送り元のドメインを、そのサービスで確認（SPF / DKIM）しておくと、迷惑メールに入りにくくなります。</p></div>
+      <div class="term"><p class="tag">SSH の鍵</p><h3>パソコンで作る鍵の組</h3><p>サーバーに入るための鍵。パソコンで 1 回だけ作ります（下）。<strong>秘密鍵はパソコンから出しません。</strong>サーバーやクラウドに渡すのは公開鍵（<code>.pub</code>）だけです。</p></div>
+    </div>
+
+    <div class="flow" id="sshkey">
+      <div class="flow-head">
+        <span class="letter">鍵</span>
+        <h3>SSH の鍵を作る</h3>
+        <p>パスワードの代わりに使う、サーバーに入るための鍵です。<strong>秘密鍵</strong>（<code>id_ed25519</code>）はパソコンにだけ置き、<strong>公開鍵</strong>（<code>id_ed25519.pub</code>）をサーバーに登録します。</p>
+        <div class="keep"><b>もう持っているなら作らなくてよい。</b><code>ls ~/.ssh/id_ed25519.pub</code> でファイルが出れば、それを使います。</div>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where pc">パソコン</span>鍵を作る</h4>
+<pre>ssh-keygen -t ed25519 -C shop</pre>
+<p>保存場所を聞かれたら Enter（既定の <code>~/.ssh/id_ed25519</code>）。<strong>パスフレーズは付けてください</strong>（パソコンを盗まれても、鍵だけでは入れません）。Mac なら一度打てばキーチェーンが覚えます。</p></li>
+        <li><h4><span class="where pc">パソコン</span>公開鍵を表示する</h4>
+<pre>cat ~/.ssh/id_ed25519.pub</pre>
+<p><code>ssh-ed25519 AAAA… shop</code> の 1 行が出ます。これがクラウドや VPS の画面に貼るものです。最後の <code>shop</code> は目印で、Google Cloud ではこれがログインするユーザー名になります。</p></li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section id="security">
+  <div class="wrap">
+    <h2>守り方の<em class="k">決まり</em></h2>
+    <p class="sub">どこで借りても、この 7 つを守ります。各ページの手順は、この決まりを画面の操作に落としたものです。</p>
+
+    <div class="two faq">
+      <div class="box"><h4>1. 入口を作らない</h4><ul>
+        <li>公開は Cloudflare Tunnel で。サーバーの 80 / 443 番は<strong>開けません。</strong></li>
+        <li>クラウドの「HTTP を許可」「HTTPS を許可」のチェックは外したままにします。</li>
+        <li>開けていない口は、攻撃されようがありません。</li>
+      </ul></div>
+      <div class="box"><h4>2. SSH は鍵だけ、できれば自分の場所からだけ</h4><ul>
+        <li>パスワードでのログインと、root での直接ログインは止めます。</li>
+        <li>クラウドのファイアウォールで、22 番に入れる相手をあなたの IP アドレスに絞ります（自宅の IP が変わったら、その都度書き換えます）。</li>
+      </ul></div>
+      <div class="box"><h4>3. アカウントはすべて二段階認証</h4><ul>
+        <li>クラウド・VPS の管理画面、Cloudflare、GitHub、ドメインを買ったところ、メールの送信サービス。</li>
+        <li>サーバーより先に、<strong>管理画面のアカウントが狙われます。</strong>乗っ取られると、サーバーごと消されます。</li>
+      </ul></div>
+      <div class="box"><h4>4. サーバーに置く鍵は最小に</h4><ul>
+        <li>AWS・Google Cloud では、サーバーに「役割」（IAM ロール・サービスアカウント）を付け、<strong>鍵のファイルを置きません。</strong></li>
+        <li>置くしかないとき（VPS から R2 へ）は、<strong>1 つのバケットだけ</strong>を扱える鍵にします。</li>
+        <li>バックアップの置き場は「足せるが消せない」権限にできるなら、そうします。サーバーが乗っ取られても、バックアップは消されません。</li>
+      </ul></div>
+      <div class="box"><h4>5. バックアップは暗号化して別の場所へ</h4><ul>
+        <li>DB のバックアップは、会員の氏名・住所・注文そのものです。<code>bin/setup.sh backup</code> が暗号化の鍵を作り、毎日 4 時に取って外へ送ります。</li>
+        <li><strong>暗号化の鍵はパスワードマネージャへ。</strong>鍵を失うと、すべてのバックアップが読めなくなります。</li>
+      </ul></div>
+      <div class="box"><h4>6. 更新を止めない</h4><ul>
+        <li>OS のセキュリティ更新は自動で入れ、ときどき再起動します。</li>
+        <li>PHP・nginx・DB の更新は <code>bin/deploy.sh</code> を打つたびに入ります（<a href="ops.html">更新と反映</a>）。</li>
+      </ul></div>
+      <div class="box"><h4>7. <code>.env</code> を控える</h4><ul>
+        <li>サーバーの <code>.env</code> には、DB のパスワードと <code>ECCUBE_AUTH_MAGIC</code>（全員のパスワードを確かめる鍵）が入っています。git には入りません。</li>
+        <li>公開したら、中身をパスワードマネージャに写しておきます。<strong>これが無いと、引っ越し先で誰もログインできません。</strong></li>
+      </ul></div>
+      <div class="box no"><h4>キットが最初からしていること</h4><ul>
+        <li>管理画面の URL を推測しにくい名前にする（<code>admin-&lt;乱数&gt;</code>）。</li>
+        <li>ログインとパスワード再発行の回数制限（1 つの IP から 1 分に 10 回）。</li>
+        <li>コンテナの権限を最小に絞る。DB と Redis はお客さんの通り道から届かない網に置く。</li>
+        <li>本番の nginx はサーバーの中（127.0.0.1）にしか開かない。</li>
+      </ul></div>
+    </div>
+
+    <div class="note">
+      <b>ufw だけに頼らない</b>
+      <span>Docker は、コンテナのポートを公開するとき、ufw（Ubuntu のファイアウォール）を通らずに穴を開けます。ufw で 443 番を閉じたつもりでも、caddy で公開していれば外から届きます。<strong>外から届く口は、クラウドや VPS の管理画面のファイアウォール</strong>（セキュリティグループ・パケットフィルター）<strong>で決めてください。</strong>Tunnel で公開していれば、そもそも開けるポートがありません。</span>
+    </div>
+  </div>
+</section>
+
+<section id="common">
+  <div class="wrap">
+    <h2>サーバーができたら、<em class="k">どこでも同じ</em></h2>
+    <p class="sub">各ページの手順で「SSH で入れるサーバー」ができたら、ここに戻ってきます。ここから先は、ぜんぶあなたのパソコンから打ちます。<code>shop</code> は、各ページで <code>~/.ssh/config</code> に書いたサーバーの呼び名です。</p>
+
+    <div class="flow">
+      <div class="flow-head">
+        <span class="letter">A</span>
+        <h3>お店を載せて公開する</h3>
+        <p>1 つずつ、終わったのを見てから次へ進みます。どのコマンドも、間違った設定のまま書き込まないように、先に試してから書きます。</p>
+        <p>時間: 30 分ほど。</p>
+        <div class="keep"><b>サーバーに git は置きません。</b>お店のファイルはパソコンから送ります。サーバーに GitHub の鍵を置かずに済みます。</div>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where srv">サーバー</span>時刻を日本時間にする</h4>
+<pre>ssh shop 'sudo timedatectl set-timezone Asia/Tokyo'</pre>
+<p>クラウドのサーバーは最初、世界標準時（日本より 9 時間遅れ）です。このままだと「毎日 4 時のバックアップ」が日本の昼 1 時に走ります。</p></li>
+        <li><h4><span class="where srv">サーバー</span>Docker を入れて、お店のファイルを送る</h4>
+<pre>bin/bootstrap-server.sh shop /srv/myshop</pre>
+<p>Docker が無ければ入れ、お店のファイルを送り、サーバーの <code>.env</code>（パスワード類）を作ります。起動はまだしません。</p></li>
+        <li><h4><span class="where srv">サーバー</span>メールの送り方を決める</h4>
+<pre>bin/setup.sh mail --remote=shop:/srv/myshop</pre>
+<p>使うサービスを選んで質問に答えると、試しに 1 通送ります。届いたものだけを書きます。<strong>サーバーから直接は送りません</strong>（クラウドはメールの 25 番を塞いでいて、送れても迷惑メールに入ります）。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>Cloudflare で Tunnel を作る</h4>
+<p>Cloudflare の画面で Zero Trust → Networks → Tunnels → トンネルを作成（種類は Cloudflared）。表示されたトークン（長い文字列）をコピーします。公開するホスト名（<code>shop.example.com</code>）の行き先は <code>http://nginx:80</code>。</p></li>
+        <li><h4><span class="where srv">サーバー</span>Tunnel のトークンを入れる</h4>
+<pre>bin/setup.sh tunnel --remote=shop:/srv/myshop</pre>
+<p>トークンを貼ると、繋がるかを試してから書きます。</p></li>
+        <li><h4><span class="where srv">サーバー</span>公開する</h4>
+<pre>bin/publish.sh --remote=shop:/srv/myshop</pre>
+<p>パスワードがまだ既定値のまま、メールが未設定、といったときは止まります。止まったら、出ている指示どおりに直してからもう一度。</p></li>
+        <li><h4><span class="where srv">サーバー</span>バックアップを毎日取る</h4>
+<pre>bin/setup.sh backup --remote=shop:/srv/myshop</pre>
+<p>送り先（各ページで作ったバケット）を選び、暗号化の鍵を作り、1 回取ってみて、毎日 4 時の自動実行に登録します。<strong>表示された暗号化の鍵を、パスワードマネージャへ。</strong></p></li>
+        <li><h4><span class="where pc">パソコン</span><code>.env</code> を控える</h4>
+<pre>ssh shop 'cat /srv/myshop/.env'</pre>
+<p>出てきた全文をパスワードマネージャに貼ります。画面に出したあとは、ターミナルの履歴を消しておくと安心です。</p></li>
+      </ol>
+    </div>
+
+    <div class="flow">
+      <div class="flow-head">
+        <span class="letter">B</span>
+        <h3>Cloudflare の設定</h3>
+        <p>ブラウザで、Cloudflare のお店のドメインを開いて設定します。既定のままだと困るものだけです。</p>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where eye">ブラウザ</span>いつも HTTPS で開くようにする</h4>
+<p>SSL/TLS → エッジ証明書 →「常に HTTPS を使用」をオン。http で来たお客さんを https へ送ります。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>キャッシュの持ち時間をお店に任せる</h4>
+<p>キャッシュ → 構成 →「ブラウザキャッシュ TTL」を「既存のヘッダーを尊重」に。既定の 4 時間のままだと、管理画面で直した CSS がお客さんのブラウザに 4 時間残ります。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>ページ全体をキャッシュする設定は使わない</h4>
+<p>「すべてをキャッシュ」（Cache Everything）のルールは作りません。カートやログインの入ったページを、ほかのお客さんに配ってしまいます。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>ボット対策は、決済で試してから</h4>
+<p>「Bot Fight Mode」を入れると、決済会社からの通知（データセンターから届く）まで止められることがあります。入れるなら、テスト決済で注文が「入金済み」になるところまで確かめてください。</p></li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section id="checklist">
+  <div class="wrap">
+    <h2>公開の前に<em class="k">確かめる</em></h2>
+    <p class="sub">1 つでも「いいえ」があれば、そこを直してから告知します。</p>
+
+    <div class="two faq">
+      <div class="box"><h4>入口</h4><ul>
+        <li><code>https://お店のドメイン/</code> が開き、鍵のマークが出る。</li>
+        <li>サーバーの IP アドレスを直接ブラウザで開いても、お店が出ない（Tunnel なら何も返らない）。</li>
+        <li>パスワードでの SSH が断られる（各ページの確かめ方）。</li>
+      </ul></div>
+      <div class="box"><h4>お店</h4><ul>
+        <li>テスト注文をして、注文メールが届く（迷惑メールフォルダも見る）。</li>
+        <li>テスト決済で、注文が「入金済み」になる。</li>
+        <li>管理画面の URL が <code>admin-&lt;乱数&gt;</code> になっている。</li>
+      </ul></div>
+      <div class="box"><h4>バックアップ</h4><ul>
+        <li>バケットに、今日の日付のフォルダがある。</li>
+        <li>暗号化の鍵と <code>.env</code> の全文が、パスワードマネージャにある。</li>
+        <li>次の朝、もう 1 日分増えている（cron が動いている）。</li>
+      </ul></div>
+      <div class="box"><h4>アカウント</h4><ul>
+        <li>クラウド・Cloudflare・GitHub・ドメイン・メールの送信サービスが、すべて二段階認証。</li>
+        <li>料金の通知（予算）を設定した。</li>
+        <li>外から死活を見る（UptimeRobot などで <code>/</code> を 5 分おき）。</li>
+      </ul></div>
+    </div>
+
+    <div class="note">
+      <b>正直に</b>
+      <span>このページと各クラウドのページは、キットのコマンドと設定を実物に照らして書きました（SSH の設定ファイルが読まれる順番、rclone の設定、ポートの開き方など）。<strong>クラウドの管理画面の項目名と配置はよく変わります。</strong>書いてある名前が見つからないときは、そのボタンで「何をしたいか」（たとえば「22 番に入れる相手を自分の IP だけにする」）で探してください。それでも分からなければ、お問い合わせからどうぞ。</span>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <h2>借りる先ごとの手順</h2>
+    <div class="nextpages"><a class="nextpage" href="server-vps.html"><span class="tag">VPS</span><h3>VPS で<em class="k">始める</em></h3><p>月額で安く、1 台で足りるお店に。SSH の守りを自分で固めます。</p></a><a class="nextpage" href="server-aws.html"><span class="tag">AWS</span><h3>AWS で<em class="k">始める</em></h3><p>EC2・IAM ロール・S3・SES。あとから大きくできます。</p></a><a class="nextpage" href="server-gcp.html"><span class="tag">Google Cloud</span><h3>Google Cloud で<em class="k">始める</em></h3><p>Compute Engine・サービスアカウント・Cloud Storage。</p></a></div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>Apache License 2.0。EC-CUBE は対象外で、EC-CUBE 自身のライセンスがそのまま適用されます（EC-CUBE は一切改変していません）。</p>
+    <p><a href="https://github.com/kurozumi/eccube-kit/releases">リリース</a> · <a href="https://github.com/kurozumi/eccube-kit/issues">Issue</a> · <a href="https://github.com/kurozumi/eccube-kit/blob/main/LICENSE">LICENSE</a> · <a href="https://github.com/kurozumi/eccube-kit/security/policy">脆弱性の報告（非公開）</a></p>
+    <p>作った人: Akira Kurozumi（<a href="https://a-zumi.net/">a-zumi.net</a>）· <a href="./#contact">お問い合わせ</a></p>
+    <p>この環境は非公式です。EC-CUBE は株式会社イーシーキューブの登録商標で、同社とは無関係です。</p>
+  </div>
+</footer>
+
+<div class="fab" id="fab" hidden>
+  <div class="fab-menu" id="fab-menu" role="dialog" aria-label="お問い合わせ / Issue">
+    <div class="head">困ったこと、こう動いてほしい<small>どちらも歓迎です。うまく書けなくて構いません。</small></div>
+    <a class="fab-item" href="https://github.com/kurozumi/eccube-kit/issues/new" target="_blank" rel="noopener">
+      <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg></span>
+      <span><b>Issue を書く</b><span>不具合・要望・質問。GitHub で公開の相談</span></span>
+    </a>
+    <a class="fab-item" href="mailto:info@a-zumi.net?subject=eccube-docker%20%E3%81%AE%E7%9B%B8%E8%AB%87">
+      <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></span>
+      <span><b>メールで相談する</b><span>公開できない話、受託の構築・引っ越し</span></span>
+    </a>
+  </div>
+  <button class="fab-btn" id="fab-btn" type="button" aria-expanded="false" aria-controls="fab-menu">
+    <svg class="chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H8l-5 3 1.2-4.2A8 8 0 1 1 21 12z"/></svg>
+    <svg class="x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    <span>お問い合わせ / Issue</span>
+  </button>
+</div>
+<script>
+(function () {
+  var fab = document.getElementById('fab');
+  var btn = document.getElementById('fab-btn');
+  var contact = document.getElementById('contact');
+  if (!fab || !btn) return;
+  fab.hidden = false;
+  var menu = document.getElementById('fab-menu');
+  // 閉じている間はメニューの中に Tab で入れないようにする（見えないリンクにフォーカスが行かない）
+  if (menu) menu.inert = true;
+  function setOpen(v) {
+    if (!v && menu && menu.contains(document.activeElement)) btn.focus();
+    fab.classList.toggle('open', v);
+    btn.setAttribute('aria-expanded', v ? 'true' : 'false');
+    if (menu) menu.inert = !v;
+  }
+  btn.addEventListener('click', function () { setOpen(!fab.classList.contains('open')); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') setOpen(false); });
+  document.addEventListener('click', function (e) { if (!fab.contains(e.target)) setOpen(false); });
+  // 連絡先の節が見えている間は出さない（同じものが二重に見えないように）
+  if (contact && 'IntersectionObserver' in window) {
+    new IntersectionObserver(function (es) {
+      var seen = es[0].isIntersecting;
+      fab.hidden = seen;
+      if (seen) setOpen(false);
+    }, { threshold: 0.15 }).observe(contact);
+  }
+})();
+</script>
+</body>
+</html>
