@@ -183,7 +183,7 @@ keep_current() { # keep_current <名前の一部> [一緒に控えるパス...]
     COPYFILE_DISABLE=1 tar -czf "${keep}/original.tar.gz" "${items[@]}" \
         || die "いまのテーマを控えられませんでした。何も変えていません。"
     log "いまのテーマ（${items[*]}）を ${keep}/original.tar.gz に控えました"
-    log "  戻すなら: rm -rf ${dir} ${appdir} && tar -xzf ${keep}/original.tar.gz"
+    log "  戻すなら: find ${dir} ${appdir} -mindepth 1 -delete && tar -xzf ${keep}/original.tar.gz   （フォルダごと消すと bind mount が外れる）"
 }
 
 # 用意した app/ と html/ で original を置き換え、.base を書く
