@@ -27,6 +27,7 @@ phpunit.11.xml
 .eccube-docker-paths
 .gitignore
 LICENSE
+LICENSE-GPL
 README.md
 AGENTS.md
 CLAUDE.md
