@@ -636,13 +636,8 @@ PHP
     fi
 
     # PHP のサポート切れ（終わる年の 10 月から）。画面は普通に動くので、ここで言わないと気づけない
-    php_cid="$(docker compose ps -q ec-cube 2>/dev/null | head -1 || true)"
-    if [ -n "$php_cid" ]; then
-        php_notice="$(image_php_eol_notice "$(image_php_of_container "$php_cid")" "$(image_eccube_of_container "$php_cid")")"
-        if [ -n "$php_notice" ]; then
-            printf '%s\n' "$php_notice" | sed 's/^/[doctor] 注意: /'
-            warn=1
-        fi
+    if image_php_eol_report "$(docker compose ps -q ec-cube 2>/dev/null | head -1 || true)" "[doctor] 注意: "; then
+        warn=1
     fi
 
     # コンパイル済みコンテナが、いま置いてあるファイルより古くないか。

@@ -164,12 +164,19 @@ image_php_of_container() { # image_php_of_container <コンテナ ID>
 }
 
 # 動いているコンテナの EC-CUBE のバージョン（4.3.1 など）。読めなければ空。
+# **版の形をしていなければ捨てる。** php の CLI は警告や致命的エラーを標準出力に出すので、autoload が
+# 読めないと「PHP Warning: require(...)」が版として返ってくる。
 image_eccube_of_container() { # image_eccube_of_container <コンテナ ID>
-    docker exec -u www-data "$1" php -r 'require "vendor/autoload.php"; echo Eccube\Common\Constant::VERSION;' 2>/dev/null || true
+    local v
+    v="$(docker exec -u www-data "$1" php -r 'require "vendor/autoload.php"; echo Eccube\Common\Constant::VERSION;' 2>/dev/null || true)"
+    case "$v" in
+        [0-9]*.[0-9]*) case "$v" in *[!0-9A-Za-z.+-]*) ;; *) printf '%s' "$v" ;; esac ;;
+    esac
 }
 
 # PHP のセキュリティサポートが終わる日（https://www.php.net/supported-versions.php ）。
 # **配る PHP を足したら、ここにも足す。** 知らない版は空（警告しない）。
+# security-scan.yml は endoflife.date を見ているが、店の手元から毎回問い合わせるのは避けた（オフラインでも出したい）。
 image_php_eol() { # image_php_eol <PHP>
     case "$1" in
         8.1) printf '2025-12-31' ;;
@@ -181,19 +188,43 @@ image_php_eol() { # image_php_eol <PHP>
     esac
 }
 
-# PHP のサポートが切れている・その年の 10 月以降なら、知らせる文を標準出力へ（それ以外は空）。
-# 店の人が毎日打つ deploy と、困ったときの doctor が出す。紹介サイトや docs は一度読んだら読み返さないので、
-# ここで出さないと、サポートの切れた PHP のまま気づかずに動かし続ける。
-# 日付の計算はしない（BSD と GNU の date が違う）。どの版も 12-31 に切れるので、文字列の比較で足りる。
+# 知らせ始める日（期限の年の 10 月 1 日）。期限を知らない版は空。
+# 日付の計算はしない（BSD と GNU の date が違う）。YYYY-MM-DD は文字列の比較で前後が分かる。
+image_php_eol_warn_from() { # image_php_eol_warn_from <PHP>
+    local eol
+    eol="$(image_php_eol "$1")"
+    [ -n "$eol" ] && printf '%s-10-01' "${eol%%-*}"
+    return 0
+}
+
+# PHP の版を比べる（8.10 > 8.9。文字列で比べると逆になる）。a が b より新しければ 0。
+image_php_newer() { # image_php_newer <a> <b>
+    local a1="${1%%.*}" a2="${1#*.}" b1="${2%%.*}" b2="${2#*.}"
+    [ "$a1" -gt "$b1" ] 2>/dev/null && return 0
+    [ "$a1" -eq "$b1" ] 2>/dev/null && [ "$a2" -gt "$b2" ] 2>/dev/null && return 0
+    return 1
+}
+
+# 勧めてよい PHP か: いまより新しく、それ自体はまだ知らせる時期に入っていない
+_image_php_recommendable() { # _image_php_recommendable <候補> <いまの PHP> <今日>
+    local f
+    f="$(image_php_eol_warn_from "$1")"
+    [ -n "$f" ] && [[ "$3" < "$f" ]] && image_php_newer "$1" "$2"
+}
+
+# PHP のサポートが切れている・期限の年の 10 月以降なら、知らせる文を標準出力へ（それ以外は空）。
 # 案内する先:
-#   同じ系列にまだ切れていない新しい PHP がある → 系列の既定（無理なら、その中でいちばん新しいもの）へ --php で。
-#     版は**いま動いているもの**を書く（~4.3.0 にすると本体のパッチも一緒に上がる。正式版の無い系列では解決できない）
+#   同じ系列に、**それ自体はまだ知らせる時期に入っていない**新しい PHP がある → 系列の既定（無理なら、その中で
+#     いちばん新しいもの）へ --php で。期限間近の版へ移しても、すぐまた同じ注意が出るので勧めない（4.2 の 8.1 → 8.2）
 #   無い（4.2 の 8.2、4.3 の 8.3 の終わり） → 系列を上げる
+# 版はいま動いているものを書く。**配布イメージでは本体の版も変わりうる**（追跡タグ 4.3-php8.2 → 4.3-php8.3 は系列の
+# 最新のパッチ、固定タグ 4.3-php8.2-v1.0.12 → 4.3-php8.3-v1.0.12 はそのリリースの時点の版）。
 image_php_eol_notice() { # image_php_eol_notice <PHP> <EC-CUBE のバージョン（空可）> [今日 YYYY-MM-DD]
-    local php="$1" ver="$2" today="${3:-$(date +%F)}" series eol v best="" def
+    local php="$1" ver="$2" today="${3:-$(date +%F)}" series eol from v best="" def ok
     eol="$(image_php_eol "$php")"
     [ -n "$eol" ] || return 0
-    [[ "$today" < "${eol%%-*}-10-01" ]] && return 0
+    from="$(image_php_eol_warn_from "$php")"
+    [[ "$today" < "$from" ]] && return 0
     series="$(image_series "$ver")"
     if [[ "$today" > "$eol" ]]; then
         echo "PHP ${php} のセキュリティサポートは ${eol} で終わりました。PHP 自体の脆弱性はもう直りません。"
@@ -201,18 +232,31 @@ image_php_eol_notice() { # image_php_eol_notice <PHP> <EC-CUBE のバージョ�
         echo "PHP ${php} のセキュリティサポートは ${eol} で終わります。"
     fi
     for v in $(image_php_versions_for_series "$series"); do
-        [[ "$(image_php_eol "$v")" > "$today" ]] && [[ "$v" > "$php" ]] && best="$v"
+        if _image_php_recommendable "$v" "$php" "$today" && { [ -z "$best" ] || image_php_newer "$v" "$best"; }; then best="$v"; fi
     done
     def="$(image_php_for_series "$series")"
-    if [ -n "$best" ] && [[ "$def" > "$php" ]] && [[ "$(image_php_eol "$def")" > "$today" ]]; then
-        best="$def"
-    fi
+    if [ -n "$best" ] && _image_php_recommendable "$def" "$php" "$today"; then best="$def"; fi
     if [ -n "$best" ]; then
-        echo "EC-CUBE ${ver} のまま PHP ${best} に上げられます: bin/upgrade.sh ${ver} --php=${best}（本番は --prod も付ける）"
+        echo "EC-CUBE ${series} 系のまま PHP ${best} に上げられます: bin/upgrade.sh ${ver} --php=${best}（本番は --prod も付ける。配布イメージでは本体の版も変わりうるので、upgrade.sh が出す版を確かめる）"
     elif [ -n "$series" ]; then
-        echo "EC-CUBE ${series} はこれより新しい PHP に対応していません。EC-CUBE を新しい系列へ上げてください。"
+        echo "EC-CUBE ${series} 系には、これより長くサポートされる PHP がありません。EC-CUBE を新しい系列へ上げてください。"
     fi
     echo "手順: docs/upgrade.md「PHP のサポートが切れるとき」"
+}
+
+# deploy の最後と doctor が使う。動いている ec-cube の PHP を見て、知らせることがあれば <接頭辞> を付けて出す。
+# **EC-CUBE の版は、知らせる時期のときだけ読む**（コンテナの中で php を起動するので、毎日の deploy で無駄に打たない）。
+# 何も出さなかったら 1（doctor が warn を立てるのに使う）。失敗では止めない。
+image_php_eol_report() { # image_php_eol_report <コンテナ ID> <接頭辞>
+    local cid="$1" prefix="$2" php from notice
+    [ -n "$cid" ] || return 1
+    php="$(image_php_of_container "$cid")"
+    from="$(image_php_eol_warn_from "$php")"
+    [ -n "$from" ] || return 1
+    [[ "$(date +%F)" < "$from" ]] && return 1
+    notice="$(image_php_eol_notice "$php" "$(image_eccube_of_container "$cid")")"
+    [ -n "$notice" ] || return 1
+    printf '%s\n' "$notice" | sed "s/^/${prefix}/"
 }
 
 # 配布イメージの参照の PHP を差し替える。タグは「<系列>[-php<版>][-<固定の印>]」の形で、
