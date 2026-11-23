@@ -203,6 +203,28 @@ EC-CUBE 本体を汚さずに独自の実装を足す場所と、その決まり
   環境変数で上書きされていると表示して、管理画面からの変更を拒否する）。
   `dtb_template` に行は要らない（フロントは `eccube.theme` を直接使う）。
 
+- **買ったテーマ・管理画面から入れたテーマも `original` として入れる。** キットが残すテーマの静的物は
+  `html/template/original` だけ。管理画面（テンプレート管理 → アップロード）で入れると、静的物は本体の
+  ボリュームの `html/template/<コード>` に書かれ、**`bin/upgrade.sh` で消える**（ページは 200 のまま CSS と
+  画像だけ 404。例外は出ない）。`bin/backup.sh` も取らない。`original` は読み取り専用なので、管理画面から
+  `original` へアップロードすることもできない。
+
+  ```bash
+  bin/theme.sh install theme.zip           # 書庫（オーナーズストアの zip / tar.gz、管理画面でダウンロードしたもの）を入れる
+  bin/theme.sh adopt mytheme               # 管理画面から入れてあるテーマ mytheme を original へ移す
+  bin/theme.sh diff                        # 入れたときから自分が変えたファイル
+  bin/theme.sh diff theme-4.3.zip          # 作者の新しい版（4.3 対応版など）と、自分の変更・衝突を突き合わせる
+  bin/theme.sh install theme-4.3.zip --force   # 新しい版へ入れ替える（いまのものは var/theme-backup/ に控える）
+  ```
+
+  書庫の中身は本体と同じ読み方（`app/` → `app/template/original`、`html/` → `html/template/original`）。
+  入れたあとは `.env` に `ECCUBE_TEMPLATE_CODE=original`、`docker compose up -d && bin/plugin.sh reload`、
+  画面を見てから git にコミットする。テーマが元のコードを URL に直接書いていれば（`/html/template/mytheme/...`）
+  挙げるので、`original` に直す。**書庫は使い捨てのコンテナの中で展開し、`../` や絶対パスの名前・
+  シンボリックリンクがあれば入れない**（他人が作ったファイルなので）。
+  `bin/upgrade.sh` は、本体のボリュームにしか無いテーマを使っていると**何も変えずに止まる**。
+  使っていないものは消えると言うだけ。`doctor` と `backup.sh` も挙げる。
+
 # framework 級設定（monolog 等）の置き場所について
 
 **常に入れるものは `packages/`、切り替えるものは `optional/<名前>/`。** `optional/` は
