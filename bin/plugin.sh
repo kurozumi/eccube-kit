@@ -39,6 +39,8 @@ cd "$(dirname "$0")/.."
 . bin/lib/guard.sh   # guard_is_prod_stack（doctor が本番かどうかを見る）
 # shellcheck source=lib/compose.sh
 . bin/lib/compose.sh # compose_nginx_url（doctor が疎通を見る先）
+# shellcheck source=lib/image.sh
+. bin/lib/image.sh   # image_php_eol_notice（doctor が PHP のサポート切れを知らせる）
 
 ec()  { docker compose exec -T ec-cube runuser -u www-data -- php bin/console "$@"; }
 die() { echo "[plugin] エラー: $*" >&2; exit 1; }
@@ -631,6 +633,16 @@ PHP
 
     if docker compose exec -T ec-cube test -f /var/www/html/.maintenance 2>/dev/null; then
         echo "[doctor] メンテナンス表示が有効です（手動で入れたものは解除しません）"
+    fi
+
+    # PHP のサポート切れ（終わる年の 10 月から）。画面は普通に動くので、ここで言わないと気づけない
+    php_cid="$(docker compose ps -q ec-cube 2>/dev/null | head -1 || true)"
+    if [ -n "$php_cid" ]; then
+        php_notice="$(image_php_eol_notice "$(image_php_of_container "$php_cid")" "$(image_eccube_of_container "$php_cid")")"
+        if [ -n "$php_notice" ]; then
+            printf '%s\n' "$php_notice" | sed 's/^/[doctor] 注意: /'
+            warn=1
+        fi
     fi
 
     # コンパイル済みコンテナが、いま置いてあるファイルより古くないか。

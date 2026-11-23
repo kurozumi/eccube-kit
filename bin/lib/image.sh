@@ -163,6 +163,58 @@ image_php_of_container() { # image_php_of_container <コンテナ ID>
         sed -n 's/^PHP_VERSION=\([0-9]*\.[0-9]*\).*/\1/p' | head -1 || true
 }
 
+# 動いているコンテナの EC-CUBE のバージョン（4.3.1 など）。読めなければ空。
+image_eccube_of_container() { # image_eccube_of_container <コンテナ ID>
+    docker exec -u www-data "$1" php -r 'require "vendor/autoload.php"; echo Eccube\Common\Constant::VERSION;' 2>/dev/null || true
+}
+
+# PHP のセキュリティサポートが終わる日（https://www.php.net/supported-versions.php ）。
+# **配る PHP を足したら、ここにも足す。** 知らない版は空（警告しない）。
+image_php_eol() { # image_php_eol <PHP>
+    case "$1" in
+        8.1) printf '2025-12-31' ;;
+        8.2) printf '2026-12-31' ;;
+        8.3) printf '2027-12-31' ;;
+        8.4) printf '2028-12-31' ;;
+        8.5) printf '2029-12-31' ;;
+        *)   printf '' ;;
+    esac
+}
+
+# PHP のサポートが切れている・その年の 10 月以降なら、知らせる文を標準出力へ（それ以外は空）。
+# 店の人が毎日打つ deploy と、困ったときの doctor が出す。紹介サイトや docs は一度読んだら読み返さないので、
+# ここで出さないと、サポートの切れた PHP のまま気づかずに動かし続ける。
+# 日付の計算はしない（BSD と GNU の date が違う）。どの版も 12-31 に切れるので、文字列の比較で足りる。
+# 案内する先:
+#   同じ系列にまだ切れていない新しい PHP がある → 系列の既定（無理なら、その中でいちばん新しいもの）へ --php で。
+#     版は**いま動いているもの**を書く（~4.3.0 にすると本体のパッチも一緒に上がる。正式版の無い系列では解決できない）
+#   無い（4.2 の 8.2、4.3 の 8.3 の終わり） → 系列を上げる
+image_php_eol_notice() { # image_php_eol_notice <PHP> <EC-CUBE のバージョン（空可）> [今日 YYYY-MM-DD]
+    local php="$1" ver="$2" today="${3:-$(date +%F)}" series eol v best="" def
+    eol="$(image_php_eol "$php")"
+    [ -n "$eol" ] || return 0
+    [[ "$today" < "${eol%%-*}-10-01" ]] && return 0
+    series="$(image_series "$ver")"
+    if [[ "$today" > "$eol" ]]; then
+        echo "PHP ${php} のセキュリティサポートは ${eol} で終わりました。PHP 自体の脆弱性はもう直りません。"
+    else
+        echo "PHP ${php} のセキュリティサポートは ${eol} で終わります。"
+    fi
+    for v in $(image_php_versions_for_series "$series"); do
+        [[ "$(image_php_eol "$v")" > "$today" ]] && [[ "$v" > "$php" ]] && best="$v"
+    done
+    def="$(image_php_for_series "$series")"
+    if [ -n "$best" ] && [[ "$def" > "$php" ]] && [[ "$(image_php_eol "$def")" > "$today" ]]; then
+        best="$def"
+    fi
+    if [ -n "$best" ]; then
+        echo "EC-CUBE ${ver} のまま PHP ${best} に上げられます: bin/upgrade.sh ${ver} --php=${best}（本番は --prod も付ける）"
+    elif [ -n "$series" ]; then
+        echo "EC-CUBE ${series} はこれより新しい PHP に対応していません。EC-CUBE を新しい系列へ上げてください。"
+    fi
+    echo "手順: docs/upgrade.md「PHP のサポートが切れるとき」"
+}
+
 # 配布イメージの参照の PHP を差し替える。タグは「<系列>[-php<版>][-<固定の印>]」の形で、
 # ワークフローは -php 付きと無しの両方に固定の印（-vX.Y.Z / 日付 / sha）を打っている。
 #   :4.3-php8.1        + 8.3 → :4.3-php8.3
