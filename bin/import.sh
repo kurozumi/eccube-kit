@@ -25,7 +25,7 @@ cd "$(dirname "$0")/.."
 log() { echo "[import] $*"; }
 die() { echo "[import] エラー: $*" >&2; exit 1; }
 
-IMAGE_BASE="${IMPORT_IMAGE_BASE:-ghcr.io/kurozumi/eccube-docker/ec-cube}"
+IMAGE_BASE="${IMPORT_IMAGE_BASE:-ghcr.io/kurozumi/eccube-kit/ec-cube}"
 PHPSTAN_VER=1.12.12
 PHPSTAN_SHA=80cf561a258720de8935b232d2cb0110ccbb1e4d0a8593c795a402e0b3357325
 cache=var/import/cache

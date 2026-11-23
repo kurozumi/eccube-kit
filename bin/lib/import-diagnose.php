@@ -350,7 +350,7 @@ if ($crons) $asks[] = '元のサーバーの cron（' . count($crons) . ' 件。
 if ($up_n === 0 && isset($meta['upload_files'])) { $up_n = (int) $meta['upload_files']; $up_bytes = (int) ($meta['upload_kb'] ?? 0) * 1024; }
 [$ud_n, $ud_bytes] = dir_size(OLD . '/html/user_data');
 [$pd_n, $pd_bytes] = dir_size(OLD . '/app/PluginData');
-if ($pd_n > 0) $works[] = "`app/PluginData`（プラグインが置いたファイル {$pd_n} 件）を運ぶ。**キットはまだここを保存しないので、取り込みの前に対応が要る**";
+if ($pd_n > 0) $works[] = "`app/PluginData`（プラグインが置いたファイル {$pd_n} 件）を運ぶ（キットでは本体のボリュームに置き、backup と upgrade が引き継ぐ）";
 $htaccess_changed = is_file(OLD . '/.htaccess') && is_file(FROM . '/.htaccess') && !same(OLD . '/.htaccess', FROM . '/.htaccess');
 if ($htaccess_changed) $works[] = '`.htaccess` に足された転送・設定を、キットの nginx（または Cloudflare）へ移す';
 
