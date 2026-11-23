@@ -107,6 +107,24 @@
       ],
       "reason": "golang.org/x/net/html の、細工した HTML を食わせると遅くなる不具合（DoS）。お客さんから届く HTML を読み解く使い方はしていない。外に面した本体なので見直しは短く。上流の次の版を待つ（最新の版でも直っていない）",
       "review_by": "2026-12-21"
+    },
+    {
+      "image": "nginx",
+      "package": "libxml2",
+      "ids": [
+        "CVE-2026-86144"
+      ],
+      "reason": "libxml2 を使うのは xslt と njs のモジュールだけで、docker/nginx の設定はどちらも load_module していない（本体の nginx は使わない）。修正版（2.13.9-r3）は Alpine に出ていて、上流のイメージの作り直しを待つ（2026-11-23 の最新のタグでも r2）。作り直されれば deploy の pull で入る",
+      "review_by": "2026-12-07"
+    },
+    {
+      "image": "postgres",
+      "package": "libxml2",
+      "ids": [
+        "CVE-2026-86144"
+      ],
+      "reason": "postgres 本体が XML 型・xpath のために使うが、EC-CUBE は XML を DB で解釈しない。DB は backend ネットワークにだけあり外から届かない。修正版（2.13.9-r3）は Alpine に出ていて、上流のイメージの作り直しを待つ（2026-11-23 の最新のタグでも r2）。作り直されれば deploy の pull で入る",
+      "review_by": "2026-12-07"
     }
   ]
 }
