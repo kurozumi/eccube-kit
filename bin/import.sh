@@ -114,9 +114,9 @@ cmd_fetch() {
 
     log "${host} の ${path} を確かめます..."
     # shellcheck disable=SC2029  # path はこちらで展開してから渡す
-    ssh -o BatchMode=yes "$host" "test -f '${path}/src/Eccube/Common/Constant.php'" \
+    ssh -n -o BatchMode=yes "$host" "test -f '${path}/src/Eccube/Common/Constant.php'" \
         || die "${host}:${path} に EC-CUBE 4 が見つかりません（SSH の鍵で入れるか、フォルダが正しいか確かめてください）"
-    ssh -o BatchMode=yes "$host" "command -v rsync >/dev/null" || die "${host} に rsync がありません。店から zip で受け取って diagnose に渡してください"
+    ssh -n -o BatchMode=yes "$host" "command -v rsync >/dev/null" || die "${host} に rsync がありません。店から zip で受け取って diagnose に渡してください"
 
     # --full は取り込み（load）用。商品画像も取る。2 回目からは変わった分だけ
     local ex_upload=(--exclude='/html/upload/')
@@ -135,7 +135,7 @@ cmd_fetch() {
 
     log "サーバーの様子を控えます（PHP の版・画像の数・cron）..."
     # shellcheck disable=SC2029
-    ssh -o BatchMode=yes "$host" "cd '${path}' && {
+    ssh -n -o BatchMode=yes "$host" "cd '${path}' && {
         echo \"php=\$(php -r 'echo PHP_VERSION;' 2>/dev/null)\"
         echo \"upload_files=\$(find html/upload -type f 2>/dev/null | wc -l | tr -d ' ')\"
         echo \"upload_kb=\$(du -sk html/upload 2>/dev/null | cut -f1)\"
@@ -155,7 +155,7 @@ cmd_fetch() {
     url="$(sed -n 's/^DATABASE_URL=//p' "${dest}/files/.env" 2>/dev/null | tail -1 | tr -d "\"'\r")"
     [ -n "$url" ] || die ".env に DATABASE_URL がありません。DB のダンプは店から受け取って --dump= で渡してください"
     # shellcheck disable=SC2029
-    if ssh -o BatchMode=yes "$host" "URL='${url}' php -r '
+    if ssh -n -o BatchMode=yes "$host" "URL='${url}' php -r '
         \$u = parse_url(getenv(\"URL\"));
         \$q = []; parse_str(\$u[\"query\"] ?? \"\", \$q);
         \$db = ltrim(\$u[\"path\"] ?? \"\", \"/\");
@@ -354,7 +354,7 @@ $(printf '%s\n' "$stops" | sed 's/^/         ・/')"
     log "  **メールの送り先（MAILER_DSN）は引き継ぎません。** 検証の環境から本物のお客さんへメールが出ないように"
     log "  **決済は、検証で注文する前に、管理画面で必ずテスト用の設定に切り替えてください**（本物の鍵のままだと本当に請求します）"
     if [ "${CONFIRM_IMPORT:-}" != "$proj" ]; then
-        local ans; read -r -p "続行しますか? [y/N] " ans
+        local ans; read -r -p "続行しますか? [y/N] " ans || ans=""
         [ "$ans" = y ] || { rm -rf "$out"; log "中止しました。何も変えていません。"; exit 1; }
     fi
 
@@ -460,27 +460,30 @@ cmd_cutover() {
     log "  コード（app/Customize・テーマ・プラグイン）は、このリポジトリのもの（リハーサルで直したもの）を使います"
     [ "$magic_old" = "$magic_now" ] || log "  .env の ECCUBE_AUTH_MAGIC を元の店の値にします"
     local ans
-    read -r -p "始めるなら、プロジェクト名（${proj}）を打ってください: " ans
+    read -r -p "始めるなら、プロジェクト名（${proj}）を打ってください: " ans || ans=""
     [ "$ans" = "$proj" ] || die "中止しました。何も変えていません"
 
     # ── 1. 元の店をメンテナンス表示に。ここから先の失敗は、元の店を開け直す ──
-    local token; token="$(LC_ALL=C tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 24)"
+    # tr < /dev/urandom | head にしない（pipefail が tr の SIGPIPE を失敗と数え、何も言わずに終わる。試験で踏んだ）
+    local token; token="$(openssl rand -hex 12)"
     local mine=0 reopened=0
     reopen_old() {
         [ "$mine" = 1 ] && [ "$reopened" = 0 ] || return 0
         # shellcheck disable=SC2029
-        if ssh -o BatchMode=yes "$host" "[ \"\$(cat '${mfile}' 2>/dev/null)\" = 'import:${token}' ] && rm -f '${mfile}'"; then
+        if ssh -n -o BatchMode=yes "$host" "[ \"\$(cat '${mfile}' 2>/dev/null)\" = 'import:${token}' ] && rm -f '${mfile}'"; then
             reopened=1
             echo "[import] **元の店のメンテナンス表示を外しました。元の店で営業に戻っています。**" >&2
         else
             echo "[import] **元の店のメンテナンス表示を外せませんでした。** 手で消してください: ssh ${host} rm '${mfile}'" >&2
         fi
     }
-    trap 'rc=$?; if [ "$rc" != 0 ]; then echo "[import] 切り替えに失敗しました。" >&2; reopen_old; fi' EXIT
+    local kit_backup=""
+    trap 'rc=$?; if [ "$rc" != 0 ]; then echo "[import] 切り替えに失敗しました。" >&2; reopen_old
+        if [ -n "$kit_backup" ]; then echo "[import] このキットは途中の状態です（公開前）。切り替える前に戻すなら: bin/restore.sh ${kit_backup}" >&2; fi; fi' EXIT
     trap 'exit 130' INT TERM
     local had
     # shellcheck disable=SC2029
-    had="$(ssh -o BatchMode=yes "$host" "if [ -e '${mfile}' ]; then echo had; else printf '%s' 'import:${token}' > '${mfile}' && echo put; fi")" \
+    had="$(ssh -n -o BatchMode=yes "$host" "if [ -e '${mfile}' ]; then echo had; else printf '%s' 'import:${token}' > '${mfile}' && echo put; fi")" \
         || die "元の店をメンテナンス表示にできませんでした（${mfile} に書けない？）。何も変えていません"
     case "$had" in
         put) mine=1; log "元の店をメンテナンス表示にしました" ;;
@@ -513,8 +516,9 @@ cmd_cutover() {
         --entrypoint php "$img" -d memory_limit=1G /kit-pack.php pack-data "$theme" | sed -n 's/^DIFFER=//p')" \
         || die "元の店のデータを詰め直せませんでした"
 
-    log "このキットのいまの状態を控えます（BACKUP_LABEL=before-cutover）..."
-    BACKUP_LABEL=before-cutover bin/backup.sh >/dev/null || die "このキットを控えられませんでした。何も変えていません"
+    log "このキットのいまの状態を控えます（backups/<日時>-before-cutover）..."
+    local blog; blog="$(BACKUP_LABEL=cutover bin/backup.sh 2>&1)" || { printf '%s\n' "$blog" >&2; die "このキットを控えられませんでした。このキットは何も変えていません"; }
+    kit_backup="$(printf '%s\n' "$blog" | sed -n 's/^\[backup\] 完了: //p' | tail -1)"
 
     [ "$magic_old" = "$magic_now" ] || set_env ECCUBE_AUTH_MAGIC "$magic_old"
     # shellcheck disable=SC2046
