@@ -172,6 +172,9 @@ DoctrineMigrations / config / Plugin）と `html/user_data`（独自 CSS/JS）�
   コンテナ内 .env / **ホストの .env**）。`admin-files.tar.gz` は `html/user_data` 全体と
   `app/Plugin`（`.git` 抜き。remote は `plugins.txt`）を含む。favicon・納品書ロゴ・買った
   プラグインは git に無いので、ここでしか運ばれない。
+  **`app/PluginData`（プラグインが置いたファイル）は本体のボリュームの中にしか無い**（bind mount にすると、
+  いまある店の中身を空のフォルダで覆い隠す）。中身があれば `plugindata.tar.gz` に取り、`restore.sh` は
+  ボリュームへ戻し、`upgrade.sh` は作り直す前の写しから新しいボリュームへ写す。v1.0.23 までは upgrade で消えていた。
   **`ECCUBE_AUTH_MAGIC` は全パスワードのハッシュの鍵。** 違う値で DB を戻すと誰も
   ログインできず、エラーも出ない。`restore.sh` が DB を戻す前に突き合わせて止める。
   引っ越しは「clone → `bin/init.sh` → AUTH_MAGIC を合わせる → `bin/restore.sh`」。

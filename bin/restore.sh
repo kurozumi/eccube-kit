@@ -11,6 +11,7 @@
 #   db.sql.gz          DB（既存データを DROP して置き換える。確認プロンプトあり）
 #   upload.tar.gz      アップロード画像
 #   admin-files.tar.gz 管理画面が書いたファイルと git に入らない資産
+#   plugindata.tar.gz  プラグインが置いたファイル（app/PluginData。あるときだけ。本体のボリュームへ戻す）
 #                      （app/template・html/user_data 全体・app/Plugin）
 #   container.env      **戻さない。** 管理画面が書くキーの差分を出すだけ。
 #                      ホストの .env や compose が渡す値と衝突しうるので、人が決める。
@@ -323,6 +324,13 @@ if has upload.tar.gz; then
     # 書庫の先頭は upload/ なので、/ に展開すると /upload（＝ボリューム）に重なる。
     # www-data は uid 33（php:*-fpm 系の既定）。alpine には無いので数字で指定する。
     rd upload.tar.gz | vol_rw eccube_upload /upload sh -c 'tar -C / -xzf - && chown -R 33:33 /upload'
+fi
+
+if has plugindata.tar.gz; then
+    echo "[restore] プラグインが置いたファイル（app/PluginData）を復元しています..."
+    # 本体のボリュームの中。いまのものを消してから戻す（控えに無いファイルを残さない）
+    rd plugindata.tar.gz | vol_rw eccube_app /app sh -c 'mkdir -p /app/app && rm -rf /app/app/PluginData && tar -C /app/app -xzf - && chown -R 33:33 /app/app/PluginData'
+    need_reload=1
 fi
 
 if has admin-files.tar.gz; then

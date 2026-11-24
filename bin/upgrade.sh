@@ -705,6 +705,14 @@ echo "[upgrade] インストール済みマーカーを設定します..."
 "${dc[@]}" run --rm --no-deps --entrypoint sh ec-cube \
     -c "mkdir -p /var/www/html/var && touch /var/www/html/var/.eccube_installed && printf '%s' '${manual_maint:-upgrade:${token}}' > ${MAINT} && chown www-data:www-data ${MAINT}"
 
+# プラグインが置いたファイル（app/PluginData）は本体のボリュームの中にしか無い。作り直したので、上げる前の写しから
+# 戻す（戻さないと、プラグインの設定ファイルや上げたファイルが黙って消える）
+if [ "${vol_saved:-0}" = 1 ]; then
+    echo "[upgrade] プラグインが置いたファイル（app/PluginData）を引き継ぎます..."
+    docker run --rm -v "${prev_vol}:/from:ro" -v "${app_vol}:/to" alpine:3 sh -c \
+        'if [ -d /from/app/PluginData ]; then mkdir -p /to/app/PluginData && cp -a /from/app/PluginData/. /to/app/PluginData/; fi'
+fi
+
 # 7) 公開する前にスキーマとデータを合わせる。
 #
 #    ここで先に up -d してしまうと、新コード + 旧スキーマの状態で nginx が公開され、
