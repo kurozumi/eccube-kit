@@ -27,6 +27,8 @@ cd "$(dirname "$0")/.."
 . "$(dirname "$0")/lib/guard.sh"
 # shellcheck source=lib/image.sh
 . "$(dirname "$0")/lib/image.sh"
+# shellcheck source=lib/theme.sh
+. "$(dirname "$0")/lib/theme.sh"
 
 # ボリュームの中身は **alpine で読む。** ec-cube のイメージで `docker compose run`
 # すると、イメージが無いときにフルビルドが始まる（composer で本体取得、数分）。
@@ -190,6 +192,15 @@ if [ -f .env ]; then
     cp .env "${dest}/host.env" && chmod 600 "${dest}/host.env"
     # EC-CUBE に渡す任意設定（.env.app、あれば）。秘密が入りうるので同じ扱い
     if [ -f .env.app ]; then cp .env.app "${dest}/host.app.env" && chmod 600 "${dest}/host.app.env"; fi
+fi
+
+# 管理画面から入れたテーマの静的物は、本体のボリュームにしか無く、ここでは取らない（取っても戻す先が
+# 本体のボリュームで、upgrade で作り直される）。original へ移せば git に入る。
+unsaved_themes="$(theme_unsaved_dirs "${proj}_eccube_app")"
+if [ -n "$unsaved_themes" ]; then
+    echo "[backup] 注意: 本体のボリュームにしか無いテーマがあります。このバックアップには入っていません:"
+    printf '%s\n' "$unsaved_themes" | sed 's/^/           /'
+    echo "           bin/theme.sh adopt <コード> で html/template/original へ移すと、git で残せます。"
 fi
 
 # git 管理下なら、コミットされていない「管理画面が書いた分」を見せておく。
