@@ -22,6 +22,7 @@
 | テーマ切替・セキュリティ設定 | コンテナ内 `/var/www/html/.env` | — | `container.env`（**自動では戻さない**） |
 | **`ECCUBE_AUTH_MAGIC`**・DB パスワード・トークン類 | ホストの `.env` | **ignore** | `host.env`（**自動では戻さない**。`restore.sh` が突き合わせて止める） |
 | 画像アップロード | `html/upload`（専用ボリューム） | — | `upload.tar.gz` |
+| プラグインが置いたファイル（設定・プラグインの画面から上げたもの） | `app/PluginData`（本体のボリューム） | — | `plugindata.tar.gz`（中身があるときだけ。`upgrade.sh` は新しいボリュームへ引き継ぐ） |
 | それ以外 | DB | — | `db.sql.gz` |
 
 **`ECCUBE_AUTH_MAGIC` が一番危ない。** 全パスワードのハッシュの鍵（`PasswordHasher` の salt）で、

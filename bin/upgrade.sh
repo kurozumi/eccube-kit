@@ -35,6 +35,8 @@ cd "$(dirname "$0")/.."
 . "$(dirname "$0")/lib/compose.sh"
 # shellcheck source=lib/maint.sh
 . "$(dirname "$0")/lib/maint.sh"
+# shellcheck source=lib/theme.sh
+. "$(dirname "$0")/lib/theme.sh"
 
 # --prod は本番構成（compose.prod.yaml）で上げる指定。位置は問わない。
 # --php=8.x は PHP も一緒に変える指定。
@@ -102,6 +104,31 @@ if [ -z "$proj" ]; then
     exit 1
 fi
 app_vol="${proj}_eccube_app"
+# テーマ。キットが残すテーマの静的物は html/template/original だけで、管理画面から入れたテーマは
+#   本体のボリュームの html/template/<コード> にしか無い。**この先でボリュームを作り直すと消え、
+#   ページは 200 のまま CSS と画像だけが 404 になる**（例外も出ないので、上げたあとの確認をすり抜ける）。
+#   使っているなら止める。使っていないものは消えると言うだけ。
+tcode="$(theme_code_in_use "$app_vol")"
+case "$tcode" in
+    default|original) ;;
+    *)
+        echo "[upgrade] エラー: テーマ ${tcode} を使っています。静的物（html/template/${tcode}）は本体のボリュームの中にしか無く、" >&2
+        echo "          上げるとボリュームと一緒に消えます。中止します。何も変えていません。" >&2
+        echo "          original へ移してから、もう一度実行してください:" >&2
+        if [ "$(sed -n '1s/^package=adopted://p' html/template/original/.base 2>/dev/null)" != "$tcode" ]; then
+            echo "            bin/theme.sh adopt ${tcode}" >&2
+        fi
+        echo "            .env に ECCUBE_TEMPLATE_CODE=original を書く → docker compose up -d && bin/plugin.sh reload" >&2
+        echo "            画面を確かめて git commit" >&2
+        exit 1
+        ;;
+esac
+unsaved="$(theme_unsaved_dirs "$app_vol")"
+if [ -n "$unsaved" ]; then
+    echo "[upgrade] 注意: 使っていないテーマが本体のボリュームにあります。上げると消えます（残すなら中断して bin/theme.sh adopt <コード>）:"
+    printf '%s\n' "$unsaved" | sed 's/^/           /'
+fi
+
 # DB ボリュームは種類で名前が違う（MariaDB: db_data / PostgreSQL: pg_data、compose.postgresql.yaml）
 case "$(grep -E '^DB_ENGINE=' .env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]')" in
     postgresql) db_vol="${proj}_pg_data" ;;
@@ -705,6 +732,14 @@ echo "[upgrade] インストール済みマーカーを設定します..."
 "${dc[@]}" run --rm --no-deps --entrypoint sh ec-cube \
     -c "mkdir -p /var/www/html/var && touch /var/www/html/var/.eccube_installed && printf '%s' '${manual_maint:-upgrade:${token}}' > ${MAINT} && chown www-data:www-data ${MAINT}"
 
+# プラグインが置いたファイル（app/PluginData）は本体のボリュームの中にしか無い。作り直したので、上げる前の写しから
+# 戻す（戻さないと、プラグインの設定ファイルや上げたファイルが黙って消える）
+if [ "${vol_saved:-0}" = 1 ]; then
+    echo "[upgrade] プラグインが置いたファイル（app/PluginData）を引き継ぎます..."
+    docker run --rm -v "${prev_vol}:/from:ro" -v "${app_vol}:/to" alpine:3 sh -c \
+        'if [ -d /from/app/PluginData ]; then mkdir -p /to/app/PluginData && cp -a /from/app/PluginData/. /to/app/PluginData/; fi'
+fi
+
 # 7) 公開する前にスキーマとデータを合わせる。
 #
 #    ここで先に up -d してしまうと、新コード + 旧スキーマの状態で nginx が公開され、
@@ -843,7 +878,12 @@ bin/healthcheck.sh || true
 # **.base があるだけでは出さない。** テーマを default のまま使っている店にも
 # 写しが残っていることがあり（試しに init した、など）、無関係な差分で驚かせる。
 if [ -f html/template/original/.base ] && [ "$(env_get ECCUBE_TEMPLATE_CODE)" = "original" ]; then
-    echo "[upgrade] オリジナルテーマの写しと、新しい本体との差分:"
+    if sed -n 1p html/template/original/.base | grep -q '^package='; then
+        echo "[upgrade] 買ったテーマ（または移したテーマ）を使っています。新しい EC-CUBE で崩れていないかを画面で確かめ、"
+        echo "          テーマの作者から新しい版が出ていれば bin/theme.sh diff <新しい書庫> で突き合わせてください。"
+    else
+        echo "[upgrade] オリジナルテーマの写しと、新しい本体との差分:"
+    fi
     bin/theme.sh diff || true
 fi
 echo "[upgrade] 管理画面とフロントの表示、受注データを必ず目視で確認してください。"

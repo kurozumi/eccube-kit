@@ -41,6 +41,8 @@ cd "$(dirname "$0")/.."
 . bin/lib/compose.sh # compose_nginx_url（doctor が疎通を見る先）
 # shellcheck source=lib/image.sh
 . bin/lib/image.sh   # image_php_eol_notice（doctor が PHP のサポート切れを知らせる）
+# shellcheck source=lib/theme.sh
+. bin/lib/theme.sh   # theme_unsaved_dirs（doctor が upgrade で消えるテーマを知らせる）
 
 ec()  { docker compose exec -T ec-cube runuser -u www-data -- php bin/console "$@"; }
 die() { echo "[plugin] エラー: $*" >&2; exit 1; }
@@ -813,6 +815,13 @@ PHP
             echo "           サイトの CSS と画像が 404 になっています。bin/theme.sh init で本体から写してください"
             ng=1
         fi
+    fi
+    # 管理画面から入れたテーマは本体のボリュームにしか無く、bin/upgrade.sh で消える。backup にも入らない
+    unsaved_themes="$(theme_unsaved_dirs "$(guard_project_name)_eccube_app")"
+    if [ -n "$unsaved_themes" ]; then
+        echo "[doctor] 本体のボリュームにしか無いテーマがあります（upgrade で消え、backup にも入りません）: $(printf '%s' "$unsaved_themes" | tr '\n' ' ')"
+        echo "           bin/theme.sh adopt <コード> で html/template/original へ移してください"
+        warn=1
     fi
 
     # 任意機能（redis / messenger）の整合。スイッチは COMPOSE_PROFILES 一本だが、

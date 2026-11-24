@@ -35,6 +35,12 @@ DoctrineMigrations / config / Plugin）と `html/user_data`（独自 CSS/JS）�
     `bin/upgrade.sh` の最後に `theme.sh diff` で本体側の変更を出す。
     テーマの選択は `.env` の `ECCUBE_TEMPLATE_CODE`（管理画面の選択はコンテナ内 `.env` に
     書かれ、upgrade で消える）。
+    **買ったテーマ・管理画面から入れたテーマも `original` として入れる**（`bin/theme.sh install <書庫>` /
+    `adopt <コード>`）。管理画面のアップロードは静的物を本体のボリュームの `html/template/<コード>` に書き、
+    **upgrade で消える**（ページは 200 のまま CSS と画像だけ 404）。backup も取らない。`upgrade.sh` は
+    それを使っていれば何も変えずに止まる（`bin/lib/theme.sh`）。`.base` の 1 行目が `package=` なら書庫・adopt、
+    `version=` なら本体から写したもの。書庫は使い捨てのコンテナで展開し、busybox の unzip / tar が `../` を
+    **黙って削る**（標準エラーに 1 行だけ）のをその 1 行で見て止める。
   - **本体テーマの twig / scss はホストに無い。** `bin/ide-sync.sh` が参照用の写しを
     `.ide/` に作る（twig は `src/Eccube/Resource/template/`、scss は
     `html/template/default/assets/scss/`）。**写しを編集しても反映されない。**
@@ -175,6 +181,9 @@ DoctrineMigrations / config / Plugin）と `html/user_data`（独自 CSS/JS）�
   コンテナ内 .env / **ホストの .env**）。`admin-files.tar.gz` は `html/user_data` 全体と
   `app/Plugin`（`.git` 抜き。remote は `plugins.txt`）を含む。favicon・納品書ロゴ・買った
   プラグインは git に無いので、ここでしか運ばれない。
+  **`app/PluginData`（プラグインが置いたファイル）は本体のボリュームの中にしか無い**（bind mount にすると、
+  いまある店の中身を空のフォルダで覆い隠す）。中身があれば `plugindata.tar.gz` に取り、`restore.sh` は
+  ボリュームへ戻し、`upgrade.sh` は作り直す前の写しから新しいボリュームへ写す。v1.0.23 までは upgrade で消えていた。
   **`ECCUBE_AUTH_MAGIC` は全パスワードのハッシュの鍵。** 違う値で DB を戻すと誰も
   ログインできず、エラーも出ない。`restore.sh` が DB を戻す前に突き合わせて止める。
   引っ越しは「clone → `bin/init.sh` → AUTH_MAGIC を合わせる → `bin/restore.sh`」。
@@ -504,6 +513,7 @@ DoctrineMigrations / config / Plugin）と `html/user_data`（独自 CSS/JS）�
 | `docs/install.md` | 利用者向けの導入手順（取得 → 起動 → 更新の受け取り） |
 | `docs/customize.md` | 本体を汚さずに実装を足す場所、framework 級設定 |
 | `docs/upgrade.md` | バージョン切替とバージョンアップ、切り戻し |
+| `docs/import.md` | キットに載っていない店の取り込み（`bin/import.sh` の診断・流し込み・本番の切り替え） |
 | `docs/deploy.md` | 本番デプロイ |
 | `docs/distribute.md` | 配布と更新（配布イメージ、`bin/self-update.sh`） |
 | `docs/backup.md` | バックアップ / 復元 |
@@ -522,6 +532,11 @@ bin/init.sh                    # 初回セットアップ
 bin/deploy.sh                  # 自分のコードを反映。退避→メンテ ON→pull→migration→プラグインDB→proxy→
                                # キャッシュ→疎通→OFF。失敗したら ON のまま止まる（壊れた画面を出さない）
 bin/self-update.sh             # この環境自体を新しいリリースへ（--check で確認だけ）
+bin/import.sh fetch|diagnose   # キットに載っていない店を読むだけで調べる（docs/import.md）
+bin/import.sh unpack <フォルダ|zip> --dump=<ダンプ>  # SSH が無い店: FTP で落としたものと phpMyAdmin のダンプを fetch と同じ形に
+bin/import.sh load <取ったもの>  # それをまっさらなキットへ同じ版のまま流し込む（restore.sh を使う）
+bin/import.sh cutover <元の店>  # 本番の切り替え。元の店をメンテナンスにしてデータだけ入れ、upgrade.sh で合わせる。失敗したら元の店を開け直す
+                               # SSH が無い店は --from=var/import/<名前> --old-url=（止めて取り直すのは人。503 を確かめてから入れる）
 bin/upgrade.sh ~4.3.2          # バージョンアップ（データ保持・運用環境向け）
 bin/upgrade.sh ~4.3.2 --prod   # 本番はこちら。付けないと開発構成のまま公開される
 bin/switch-version.sh ~4.2.0   # バージョン切替（データ破棄・開発用）
