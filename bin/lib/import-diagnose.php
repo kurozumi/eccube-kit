@@ -161,7 +161,7 @@ if ($core_n > 0) $reasons[] = "本体を直接書き換えた箇所が {$core_n}
 // 店が足した migration（本体の app/DoctrineMigrations に混ぜてあるもの）
 $own_migrations = [];
 foreach (rel_files(OLD, 'app/DoctrineMigrations') as $f) if (!is_file(FROM . '/' . $f)) $own_migrations[] = $f;
-if ($own_migrations) $works[] = '店が足した migration ' . count($own_migrations) . ' 件を `app/DoctrineMigrations`（キットでは独自 migration の置き場）へ運ぶ';
+if ($own_migrations) $works[] = '店が足した migration ' . count($own_migrations) . ' 件を、名前空間を CustomizeMigrations にして運ぶ（load が DB の記録の名前も合わせる）';
 
 // ---------------------------------------------------------------- ライブラリ
 $cj_old = json_decode(@file_get_contents(OLD . '/composer.json') ?: '{}', true) ?: [];

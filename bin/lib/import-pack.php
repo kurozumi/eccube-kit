@@ -55,8 +55,25 @@ foreach (rel_files(OLD, 'app/Customize') as $f) {
     if (same(OLD . "/$f", FROM . "/$f")) continue;
     $customize[] = $f;
 }
-// 店が足した migration
-$migrations = array_values(array_filter(rel_files(OLD, 'app/DoctrineMigrations'), fn($f) => !is_file(FROM . "/$f")));
+// 店が足した migration（本体の app/DoctrineMigrations に混ぜてあるもの）。
+// キットでは独自 migration を CustomizeMigrations の名前空間で持つ（ホストの app/DoctrineMigrations をコンテナの
+// app/CustomizeMigrations へ載せる）。名前空間を書き換えて運び、DB の記録（doctrine_migration_versions.version は
+// 「名前空間\クラス名」）も同じ名前へ書き換える。記録だけ古い名前のままだと、当たっている migration をもう一度流す
+$migrations = [];   // [元の店の相対パス, クラス名, 書き換えた中身]
+$mig_stops = [];
+foreach (rel_files(OLD, 'app/DoctrineMigrations') as $f) {
+    if (is_file(FROM . "/$f") || basename($f) === '.gitkeep') continue;
+    if (!str_ends_with($f, '.php')) { $mig_stops[] = "app/DoctrineMigrations に PHP でないファイルがあります: {$f}（migration ではないので、中身を見て手で移します）"; continue; }
+    $src = file_get_contents(OLD . "/$f");
+    $cls = basename($f, '.php');
+    if (!preg_match('/^namespace\s+DoctrineMigrations\s*;/m', $src) || !preg_match('/\bclass\s+' . preg_quote($cls, '/') . '\b/', $src)) {
+        $mig_stops[] = "{$f} は、名前空間 DoctrineMigrations・ファイル名と同じクラス名の migration ではありません（手で移します）";
+        continue;
+    }
+    $new = preg_replace('/^namespace\s+DoctrineMigrations\s*;/m', 'namespace CustomizeMigrations;', $src, 1);
+    if (preg_match('/\bDoctrineMigrations\\\\/', $new)) { $mig_stops[] = "{$f} が、ほかの DoctrineMigrations のクラスを名前で使っています（手で移します）"; continue; }
+    $migrations[] = [$f, $cls, $new];
+}
 
 // ---------------------------------------------------------------- check
 $stops = [];
@@ -64,7 +81,11 @@ foreach ($customize as $f) {
     if ($f === 'app/Customize/Resource/config/services.yaml') continue; // 店のものを使う（下で伝える）
     if (is_file(KIT . "/$f") && !same(OLD . "/$f", KIT . "/$f")) $stops[] = "キットにも同じ名前のファイルがあります: {$f}（手で合わせてから、もう一度）";
 }
-if ($migrations) $stops[] = '店が足した migration があります（' . implode(', ', $migrations) . '）。名前空間と DB の記録を合わせる必要があるので、いまは手で移します（docs/import.md）';
+foreach ($mig_stops as $m) $stops[] = $m;
+foreach ($migrations as [$f, $cls, $new]) {
+    $k = KIT . "/$f";
+    if (is_file($k) && file_get_contents($k) !== $new) $stops[] = "キットにも同じ名前の migration があります: {$f}（手で合わせてから、もう一度）";
+}
 if ($mode === 'check') {
     foreach ($stops as $s) echo "STOP={$s}\n";
     exit(0);
@@ -108,6 +129,10 @@ if (in_array('app/Customize/Resource/config/services.yaml', $customize, true)) {
     $notes[] = '店の app/Customize/Resource/config/services.yaml を使いました。キットのメール疎通コマンドを使うなら、services: の下に「Customize\\Command\\MailTestCommand: ~」を足してください';
 }
 if ($customize) $notes[] = 'app/Customize に店のファイルを ' . count($customize) . ' 件入れました（git で追ってください）';
+foreach ($migrations as [$f, $cls, $new]) {
+    @mkdir(dirname(KIT . "/$f"), 0775, true);
+    file_put_contents(KIT . "/$f", $new) !== false || throw new RuntimeException("書けませんでした: $f");
+}
 
 // 足されたライブラリを composer.extra.json へ
 $cj_old = json_decode(@file_get_contents(OLD . '/composer.json') ?: '{}', true) ?: [];
@@ -194,7 +219,17 @@ $dump = is_file('/dump/dump.sql.gz') ? '/dump/dump.sql.gz' : '/dump/dump.sql';
 $in = str_ends_with($dump, '.gz') ? gzopen($dump, 'r') : fopen($dump, 'r');
 $outz = gzopen(OUT . '/db.sql.gz', 'w6');
 $mysql = null; $changed = 0;
+// migration の記録の名前。ダンプの中では区切りの \ が 2 つ重なる（mysqldump の文字列も pg_dump の COPY も \ を重ねて書く）
+$mig_re = [];
+foreach ($migrations as [$f, $cls]) $mig_re[$cls] = '/DoctrineMigrations\\\\\\\\(' . preg_quote($cls, '/') . ')(?![A-Za-z0-9_])/';
+$mig_hit = [];
 while (($l = (str_ends_with($dump, '.gz') ? gzgets($in) : fgets($in))) !== false) {
+    if ($mig_re && str_contains($l, 'DoctrineMigrations')) {
+        foreach ($mig_re as $cls => $re) {
+            $l = preg_replace($re, 'CustomizeMigrations\\\\\\\\$1', $l, -1, $c);
+            if ($c) $mig_hit[$cls] = true;
+        }
+    }
     if ($mysql === null && preg_match('/^-- (MySQL|MariaDB) dump/', $l)) $mysql = true;
     if ($mysql === null && str_starts_with($l, '-- PostgreSQL database dump')) $mysql = false;
     if ($mysql) {
@@ -210,6 +245,16 @@ while (($l = (str_ends_with($dump, '.gz') ? gzgets($in) : fgets($in))) !== false
 }
 gzclose($outz);
 if ($changed) $notes[] = "DB のダンプの {$changed} か所を MariaDB 向けに書き換えました（MySQL 8 の照合順序・GTID・USE など）";
+if ($migrations) {
+    $pending = array_values(array_diff(array_column($migrations, 1), array_keys($mig_hit)));
+    $n = count($migrations);
+    $msg = "店が足した migration {$n} 件を、名前空間を CustomizeMigrations にして app/DoctrineMigrations へ入れました（git で追ってください）。"
+        . count($mig_hit) . ' 件は元の店で当たっていたので、DB の記録の名前も書き換えました';
+    if ($pending) $msg .= '。元の店でまだ当たっていないもの（' . implode(', ', $pending) . '）は、次の起動か bin/upgrade.sh で流れます';
+    if ($mode === 'pack') $notes[] = $msg;
+}
+// 切り替え: 元の店にあって、このリポジトリに無い migration（リハーサルのあとで元の店に足された）。DB には当たっているが、ファイルが無い
+if ($mode === 'pack-data') foreach ($migrations as [$f]) if (!is_file(KIT . "/$f")) echo "MIGRATION_MISSING={$f}\n";
 
 // host.env（restore.sh が ECCUBE_AUTH_MAGIC を突き合わせる）
 $env = [];

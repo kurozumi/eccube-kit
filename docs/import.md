@@ -70,13 +70,22 @@ bin/import.sh load var/import/old.example.jp
 | 使っているテーマ | `bin/theme.sh install` で `original` へ（`.env` の `ECCUBE_TEMPLATE_CODE=original`） |
 | `app/Customize`（店が書いたもの）・足されたライブラリ | 作業ツリーと `composer.extra.json`。キットに同じ名前のファイルがあれば止まる（`services.yaml` は店のものを使う） |
 | `ECCUBE_AUTH_MAGIC`・管理画面の URL | `.env`（AUTH_MAGIC が違うと誰もログインできない） |
+| 店が `app/DoctrineMigrations` に足した migration | 作業ツリーの `app/DoctrineMigrations`。名前空間を `CustomizeMigrations` にし、DB の記録（`doctrine_migration_versions`）の名前も同じに書き換える（下） |
 
 **運ばないもの:**
 
 - **メールの送り先（`MAILER_DSN`）。** 検証の環境から本物のお客さんへメールが出ないように。手元なら Mailpit に届く。
   本番へ出すときに `.env` に書く。
 - **本体を直接書き換えた箇所。** 診断の `core.patch` を見て `app/Customize` へ書き直す。
-- 店が `app/DoctrineMigrations` に足した migration。名前空間と DB の記録を合わせる必要があるので、あれば止まる（手で移す）。
+
+**店の migration は名前空間を変えて運ぶ。** 元の店は本体の migration と同じ `app/DoctrineMigrations`（名前空間
+`DoctrineMigrations`）に置いているが、キットでは独自 migration を `CustomizeMigrations` で持つ（本体のものを覆い隠さない
+ため。`docs/customize.md`「migration を作る」）。DB は当たった migration を「名前空間\クラス名」で覚えているので、
+ファイルだけ移すと**当たっているものを別の migration とみなしてもう一度流す**（列の追加なら「もうある」で落ちる）。
+`load` はファイルの名前空間とダンプの記録の両方を書き換える。元の店でまだ当たっていないものは、次の起動か
+`upgrade.sh` で流れる。止まるのは、PHP でないファイル・名前空間やクラス名の形が違うもの・ほかの migration を名前で
+使うもの・キットに同じ名前で中身の違うものがあるとき（手で移す）。`cutover` も、取り直した DB の記録を同じように
+書き換える。リハーサルのあとで元の店に足された migration は、終わったときに挙げる。
 
 **決済は、検証で注文する前に、管理画面でテスト用の設定に切り替える。** 決済プラグインの設定は DB に入っていて、
 本物の鍵のまま運ばれる。そのまま注文すると本当に請求する。
