@@ -214,6 +214,12 @@ bin/import.sh cutover --from=var/import/myshop --old-url=https://shop.example.jp
   レンタルサーバーの管理画面のバックアップ機能の形（会社ごとに違う）は、1 店目で確かめる。mysqldump・phpMyAdmin
   以外の形（Adminer など）は、いまは受け付けない
 
+- **元の店の DB に、本体の migration の記録が 1 件も無いことが多い。** EC-CUBE のインストーラ（画面からも
+  `eccube:install` も）は表を作るだけで、migration を記録しない（`doctrine_migration_versions` を消して終わる）。
+  なので取り込んだあとの最初の `upgrade.sh`・`cutover` で、本体の migration が全部流れる。本体の migration は、
+  インストール直後の店でも流れる前提で書かれている（条件付きか、同じ結果になる `UPDATE`。4.4 の 26 件を読んだ）。
+  ただし `dtb_page` の id 42 のページ名や、CSV 出力の項目（`dtb_csv` の 119・122・190・193）は、店が変えていれば
+  本体の値に戻る。これは本体を上げるたびに起きることで、取り込みに限らない
 - PHPStan はレベル 1。クラスの宣言が合わない（4.3 で `AbstractPluginManager` の引数の型が変わった、など）は
   拾うが、メソッドが消えたことは拾わない。それを補うのが名前での検索で、こちらは決まった型しか見ない。
   **「誤り 0」は「動く」ではない**。
