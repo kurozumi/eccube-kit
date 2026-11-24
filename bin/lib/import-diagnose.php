@@ -343,6 +343,12 @@ if (is_file('/meta.env')) {
         if ($k === 'cron') $crons[] = $v; else $meta[$k] = $v;
     }
 }
+// unpack で整えたもの: サーバーの様子は無い。phpMyAdmin のダンプは取り直しているので、元の DB の版は meta に残っている
+$archive = ($meta['source'] ?? '') === 'archive';
+if (!empty($meta['db_server'])) {
+    $dump_info['server'] = $meta['db_server'];
+    $dump_info['mariadb'] = stripos($meta['db_server'], 'mariadb') !== false;
+}
 if ($crons) $asks[] = '元のサーバーの cron（' . count($crons) . ' 件。下の「サーバー」）を、切り替えたら止める。キットでも要るものは移す';
 
 // ---------------------------------------------------------------- そのほか運ぶもの
@@ -364,7 +370,7 @@ if ($db_kind === 'sqlite') $reasons[] = 'DB が SQLite です。キットは Mar
 // 店に必ず確かめること（ファイルからは分からない）
 $asks[] = '決済会社の管理画面で、結果通知の URL と、通信を許す IP アドレスを登録しているか（サーバーが変わると届かなくなる）';
 $asks[] = 'メールをどこから送っているか（サーバーが変わると SPF / DKIM の設定が要る）';
-if (!is_file('/meta.env')) $asks[] = 'サーバーで定期的に動かしている処理（cron）があるか。切り替えたら古いサーバーで止める';
+if (!is_file('/meta.env') || $archive) $asks[] = 'サーバーで定期的に動かしている処理（cron）があるか（レンタルサーバーなら管理画面の「cron 設定」）。切り替えたら古いサーバーで止める';
 $asks[] = '店の URL がドメインの直下か、`/shop/` のような下の階層か';
 if (($env['MAILER_DSN'] ?? '') === '' || str_starts_with($env['MAILER_DSN'] ?? '', 'null:')) $asks[] = 'メールの送り先（MAILER_DSN）が .env に無い。どう送っているか';
 
@@ -392,7 +398,8 @@ $L[] = '| 項目 | 値 |';
 $L[] = '|---|---|';
 $L[] = "| EC-CUBE | {$from_ver} |";
 $L[] = '| DB | ' . md($db_kind) . ($dump_info['server'] ? '（' . md($dump_info['server']) . '）' : '') . ' `' . md(mask_url($db_url)) . '` |';
-$L[] = '| DB のダンプ | ' . ($dump ? human($dump_info['bytes']) . ($dump_info['complete'] ? '・完了の行あり' : '・**完了の行なし**') : '受け取っていない') . ' |';
+$L[] = '| DB のダンプ | ' . ($dump ? human($dump_info['bytes']) . ($dump_info['complete'] ? '・完了の行あり' : '・**完了の行なし**') : '受け取っていない')
+    . (($meta['dump_from'] ?? '') === 'phpmyadmin' ? '（phpMyAdmin の書き出しを、使い捨ての DB に入れて取り直したもの）' : '') . ' |';
 $L[] = "| 使っているテーマ | {$theme} |";
 $L[] = "| 管理画面の URL | /{$admin_route} |";
 $L[] = "| 商品画像など（html/upload） | {$up_n} ファイル・" . human($up_bytes) . ' |';
@@ -400,7 +407,12 @@ $L[] = "| 独自の CSS / JS（html/user_data） | {$ud_n} ファイル・" . hu
 $L[] = "| プラグインが置いたファイル（app/PluginData） | {$pd_n} ファイル・" . human($pd_bytes) . ' |';
 $L[] = '| ECCUBE_AUTH_MAGIC | ' . (isset($env['ECCUBE_AUTH_MAGIC']) && $env['ECCUBE_AUTH_MAGIC'] !== '' ? 'あり（引き継ぐ。無いと誰もログインできない）' : '**無い**') . ' |';
 $L[] = '';
-if ($meta) {
+if ($archive) {
+    $L[] = '';
+    $L[] = '## サーバー';
+    $L[] = '';
+    $L[] = 'ファイルと DB を受け取って調べたので、サーバーの様子（OS・PHP・メモリ・cron）は分かりません。SSH が使えないレンタルサーバーなら、キットは**別のサーバー**に立てます。';
+} elseif ($meta) {
     $same_ok = ($meta['docker'] ?? '') === 'yes' || ($meta['root'] ?? '') === 'yes';
     $mem = (int) ($meta['mem_mb'] ?? 0);
     $L[] = '';
