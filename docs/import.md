@@ -8,10 +8,13 @@
 
 | 段 | やること | コマンド |
 |---|---|---|
-| 1. 診断 | 元の店を読むだけで、何が要るかを報告書にする | `bin/import.sh fetch` / `diagnose` |
-| 2. 取り込み | 同じ版のまま、まっさらなキット（手元か検証の環境）へ流し込む | `bin/import.sh fetch --full` / `load` |
+| 1. 診断 | 元の店を読むだけで、何が要るかを報告書にする | `bin/import.sh fetch`（SSH）か `unpack`（FTP）/ `diagnose` |
+| 2. 取り込み | 同じ版のまま、まっさらなキット（手元か検証の環境）へ流し込む | `bin/import.sh fetch --full`（SSH）か `unpack`（FTP）/ `load` |
 | 3. 上げる | 検証の環境で `bin/upgrade.sh ~4.3 --php=8.3` | `bin/upgrade.sh` |
-| 4. 切り替え | 本番のキットで、元の店をメンテナンスにし、データだけを取り直して入れる。DNS は人が向け替える | `bin/import.sh cutover` |
+| 4. 切り替え | 本番のキットで、元の店をメンテナンスにし、データだけを取り直して入れる。DNS は人が向け替える | `bin/import.sh cutover`（SSH）か `cutover --from=`（FTP） |
+
+元の店に SSH で入れるか（`fetch`）、入れないか（`unpack`。下の「SSH が使えないレンタルサーバー」）で、取り方だけが違う。
+取ったものは同じ形（`var/import/<名前>/` の `files/`・`dump.sql.gz`・`meta.env`）になり、`diagnose` と `load` はどちらも同じ。
 
 ## 1. 診断
 
@@ -20,8 +23,9 @@
 bin/import.sh fetch shop@old.example.jp:/var/www/eccube
 bin/import.sh diagnose var/import/old.example.jp
 
-# SSH が無いなら、店から zip（EC-CUBE のフォルダ丸ごと）と DB のダンプを受け取って
-bin/import.sh diagnose ~/受け取り/eccube --dump=~/受け取り/eccube.sql.gz
+# SSH が無いなら、FTP で落としたフォルダ（か zip）と、phpMyAdmin などで取った DB のダンプを整えてから
+bin/import.sh unpack ~/受け取り/public_html --dump=~/受け取り/eccube.sql --name=myshop
+bin/import.sh diagnose var/import/myshop
 ```
 
 報告書は `var/import/<名前>/report/report.md`。見るもの:
@@ -80,6 +84,38 @@ bin/import.sh load var/import/old.example.jp
 取り込んだら、画面・管理画面のログイン（元の店のパスワード）を確かめ、`git commit` してから
 `bin/upgrade.sh ~4.3.0 --php=8.3` で上げる。上げた先で読めないプラグインがあれば、upgrade.sh が何も変えずに止まる。
 
+### SSH が使えないレンタルサーバー
+
+ロリポップ・さくらのレンタルサーバ・エックスサーバーなどの共用サーバーで、SSH が無い・使い方が分からない店は、
+FTP とサーバーの管理画面で取って、`bin/import.sh unpack` で整える。
+
+1. **ファイル**: FTP ソフトで、EC-CUBE のフォルダ（`src/` と `.env` がある場所。`public_html` の下のことが多い）を
+   丸ごと落とす。`vendor` も落ちてくるが、`unpack` が捨てる。**点で始まるファイル（`.env`）を隠す FTP ソフトがある**
+   （FileZilla は「サーバー → 隠しファイルを強制表示」）。`.env` が無いと `unpack` は止まる（全パスワードの鍵
+   `ECCUBE_AUTH_MAGIC` と DB の接続先が入っている）。サーバーの管理画面のファイルマネージャーで zip に固めて落としても
+   よい（zip / tar.gz をそのまま渡せる）
+2. **DB**: サーバーの管理画面のバックアップ機能（mysqldump の形で出るものが多い）か、phpMyAdmin の「エクスポート」
+   （既定のまま、形式は SQL）。`.sql`・`.sql.gz`・それを 1 つ入れた `.zip` のどれでもよい
+
+```bash
+bin/import.sh unpack ~/受け取り/public_html --dump=~/受け取り/eccube.sql --name=myshop
+```
+
+`unpack` がやること:
+
+- フォルダ（か書庫）から EC-CUBE の場所を探し（`src/Eccube/Common/Constant.php`）、`vendor`・`var`・キャッシュを
+  除いて写す。書庫は使い捨てのコンテナの中で開き、外へ書き出そうとする名前（`../`）やリンクがあれば入れない
+- **phpMyAdmin のダンプは、使い捨ての DB（MySQL 8 か MariaDB 10.11。ダンプの見出しの版で選ぶ）に一度入れて、
+  mysqldump で取り直す。** phpMyAdmin の書き出しには「最後まで書いた」の印が無く、`CREATE TABLE` の前に `DROP` も
+  無いので、そのままでは `bin/restore.sh` が受け付けない。入れて取り直すことで、入りきるか・EC-CUBE の表が
+  そろっているか（一部の表だけを選んで書き出していないか）も確かめる。元の DB の版は `meta.env` に残し、報告書に出す
+- **途中で切れたダンプは止める。** レンタルサーバーの phpMyAdmin は大きい DB で時間切れになり、途中までのファイルを
+  正常に渡してくる。最後に `COMMIT` も文字コードの戻しも無ければ止める（そのときはサーバーのバックアップ機能か、
+  gzip 圧縮で書き出し直す）
+
+取り込み（`load`）には商品画像（`html/upload`）が要る。FTP で丸ごと落としていれば入っている。
+サーバーの様子（PHP・メモリ・cron）は分からないので、報告書は cron を店に聞く項目にする（管理画面の「cron 設定」）。
+
 ## 3. 上げる（リハーサル）
 
 取り込んだ環境で `bin/upgrade.sh ~4.3.0 --php=8.3`。止まったら、診断の報告書に従って直す:
@@ -117,10 +153,35 @@ bin/import.sh cutover shop@old.example.jp:/var/www/eccube --old-url=https://shop
 表示は残す）。このキットは途中の状態で残る（公開前）ので、表示に出る `bin/restore.sh backups/…-before-cutover` で戻す。
 DNS を向け替えたあとに戻すと、新しいサーバーで受けた注文が元の店に無い。戻すなら向け替える前に決める。
 
+**SSH が使えない店**は、元の店を止めるのと取り直すのを人がやり、整えたものを渡す:
+
+1. 元の店の管理画面で「コンテンツ管理 → メンテナンス管理」を有効にする。**ここからお客さんは注文できない。**
+   有効にした人のブラウザは素通りするので、止まったかは別の端末（スマホの回線など）で見る
+2. **そのあとで**、FTP でファイルを落とし直し（FTP ソフトの「同期」なら変わった分だけ）、DB を書き出し直して、
+   同じ名前で `unpack` する（前の報告書は残る）
+3. 本番のキットで:
+
+```bash
+bin/import.sh cutover --from=var/import/myshop --old-url=https://shop.example.jp/
+```
+
+`--old-url` は必須で、元の店が 503 でなければ**何も変えずに止まる**。取ったのがメンテナンスにする前か後かは
+コマンドからは分からないので、確認の表示で念を押す（前に取ったものだと、そのあとの注文と会員登録が消える）。
+整えてから 2 時間を超えていれば注意を出す。そこから先（控え → データだけ入れる → `upgrade.sh` → `plugin.sh sync`
+→ 疎通）は SSH のときと同じ。**失敗したときにメンテナンス表示を外すのは人**（コマンドは元の店に触れない）。
+
+**合わせる先は、いま動いている版の系列。** 配布イメージの環境では `.env` の `ECCUBE_VERSION` が使われず、動いている版と
+ずれていることがあるので、そこからは取らない（試験で、4.2 で動いているキットを切り替えのついでに 4.3 へ上げようとした）。
+手元で build する環境は `ECCUBE_VERSION` を使い、系列が動いている版と違えば、元の店を止める前に止まる。
+
 元の店の管理画面で直せるファイル（ブロック・メール・CSS）は運ばない。リハーサルのあとに元の店で直されていて、
 このリポジトリのものと違えば、終わったときに挙げる。
 
 ### 分かっていること
+
+- 確かめたのは手元の試験（4.2.3-p2・MySQL 8 の店、phpMyAdmin 5.2 の日本語の画面で書き出したもの）まで。本物の
+  レンタルサーバーの管理画面のバックアップ機能の形（会社ごとに違う）は、1 店目で確かめる。mysqldump・phpMyAdmin
+  以外の形（Adminer など）は、いまは受け付けない
 
 - PHPStan はレベル 1。クラスの宣言が合わない（4.3 で `AbstractPluginManager` の引数の型が変わった、など）は
   拾うが、メソッドが消えたことは拾わない。それを補うのが名前での検索で、こちらは決まった型しか見ない。

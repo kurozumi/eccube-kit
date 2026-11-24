@@ -4,6 +4,11 @@
 #   bin/import.sh fetch <ユーザー>@<ホスト>:<EC-CUBE のフォルダ> [--name=<名前>]
 #       元のサーバーから、診断に要るファイルと DB のダンプを SSH で取ってくる（読むだけ）。
 #       置き場は var/import/<名前>/。商品画像（html/upload）と vendor は取らない（数と大きさだけ数える）。
+#   bin/import.sh unpack <フォルダ | zip | tar.gz> --dump=<.sql | .sql.gz | .zip> [--name=<名前>]
+#       SSH が使えないレンタルサーバー向け。FTP で落としたフォルダ（または管理画面で固めた zip）と、サーバーの管理画面
+#       （phpMyAdmin・バックアップ機能）で取った DB のダンプを、fetch で取ったのと同じ形（var/import/<名前>/）に整える。
+#       phpMyAdmin のダンプは、使い捨ての DB に一度入れて mysqldump で取り直す（入りきるか・表がそろっているかを確かめる）。
+#       以降の diagnose / load はそのまま使える。
 #   bin/import.sh diagnose <店のフォルダ> [--dump=<ダンプ>] [--to=4.3]
 #       取ってきたもの（または店から受け取った zip を展開したフォルダ）を調べ、報告書を作る。
 #       fetch で取ったフォルダなら、ダンプは自動で使う。
@@ -20,6 +25,9 @@
 #       元の店をメンテナンス表示にし、変わった分と DB を取り直し、データだけ（DB・画像・PluginData・ページ）を入れて
 #       bin/upgrade.sh でこのキットの版に合わせる。コードはこのリポジトリのものを使う。
 #       **途中で失敗したら、元の店のメンテナンス表示を外して営業に戻す。** DNS の向け替えは人がやる。
+#   bin/import.sh cutover --from=var/import/<名前> --old-url=https://元の店/
+#       SSH が使えない店の切り替え。人が元の店の管理画面でメンテナンス表示にし、ファイルと DB を取り直して unpack した
+#       あとで打つ。元の店が本当にメンテナンス画面（503）かを確かめてから流し込む。失敗したら、表示を外すのは人。
 #
 # 診断で見るもの（報告書は var/import/<名前>/report/report.md）:
 #   - 本体を直接書き換えた箇所（同じ版のまっさらな EC-CUBE と比べる。差分は core.patch）
@@ -116,7 +124,7 @@ cmd_fetch() {
     # shellcheck disable=SC2029  # path はこちらで展開してから渡す
     ssh -n -o BatchMode=yes "$host" "test -f '${path}/src/Eccube/Common/Constant.php'" \
         || die "${host}:${path} に EC-CUBE 4 が見つかりません（SSH の鍵で入れるか、フォルダが正しいか確かめてください）"
-    ssh -n -o BatchMode=yes "$host" "command -v rsync >/dev/null" || die "${host} に rsync がありません。店から zip で受け取って diagnose に渡してください"
+    ssh -n -o BatchMode=yes "$host" "command -v rsync >/dev/null" || die "${host} に rsync がありません。FTP で落として bin/import.sh unpack で整えてください"
 
     # --full は取り込み（load）用。商品画像も取る。2 回目からは変わった分だけ
     local ex_upload=(--exclude='/html/upload/')
@@ -175,10 +183,227 @@ cmd_fetch() {
         log "DB のダンプ: ${dest}/dump.sql.gz（$(du -h "${dest}/dump.sql.gz" | cut -f1)）"
     else
         rm -f "${dest}/dump.sql.gz.part"
-        log "注意: DB をダンプできませんでした（向こうに mysqldump / pg_dump が無い、など）。店から受け取って --dump= で渡してください"
+        log "注意: DB をダンプできませんでした（向こうに mysqldump / pg_dump が無い、など）。サーバーの管理画面（phpMyAdmin など）で取り、bin/import.sh unpack ${dest}/files --dump=<ファイル> で整えてください"
     fi
     echo
     log "取ってきました: ${dest}"
+    log "次: bin/import.sh diagnose ${dest}"
+}
+
+# ---------------------------------------------------------------- unpack
+# 店から受け取ったフォルダ・書庫を、fetch と同じ形（files/・dump.sql.gz・meta.env）に整える。
+# 書庫は他人が作ったものなので、使い捨てのコンテナの中で開き、外へ書き出そうとする名前・リンクがあれば入れない
+unpack_files() { # unpack_files <フォルダ | 書庫> <置き場>
+    local in="$1" to="$2" abs kind mount
+    if [ -d "$in" ]; then
+        kind=dir; abs="$(cd "$in" && pwd)"; mount="${abs}:/in/dir:ro"
+    else
+        [ -f "$in" ] || die "ありません: $in"
+        abs="$(cd "$(dirname "$in")" && pwd)/$(basename "$in")"; mount="${abs}:/in/pkg:ro"
+        case "$in" in
+            *.zip) kind=zip ;;
+            *.tar.gz|*.tgz) kind=tgz ;;
+            *.tar) kind=tar ;;
+            *) die "フォルダか、zip / tar.gz / tar を渡してください: $in" ;;
+        esac
+    fi
+    mkdir -p "$to"
+    local err; err="$(mktemp)"
+    if ! docker run --rm --network none -v "$mount" alpine:3 sh -c '
+        set -e
+        if [ "$1" = dir ]; then cd /in/dir; else
+            mkdir -p /w && cd /w
+            # busybox の unzip / tar は ../ や先頭の / を黙って削って続ける（標準エラーに 1 行出すだけ）
+            case "$1" in
+                zip) names="$(unzip -l /in/pkg 2>&1 || true)" ;;
+                tgz) names="$(tar -tzf /in/pkg 2>&1 || true)" ;;
+                tar) names="$(tar -tf /in/pkg 2>&1 || true)" ;;
+            esac
+            if printf "%s\n" "$names" | grep -qE "removing leading|(^/|(^|/)\.\.(/|$))"; then echo BADNAME >&2; exit 5; fi
+            case "$1" in
+                zip) unzip -q /in/pkg ;;
+                tgz) tar -xzf /in/pkg ;;
+                tar) tar -xf /in/pkg ;;
+            esac
+        fi
+        roots="$(find . -maxdepth 7 -path "*/src/Eccube/Common/Constant.php" ! -path "*/__MACOSX/*" ! -path "*/vendor/*" | sed "s#/src/Eccube/Common/Constant.php\$##")"
+        [ -n "$roots" ] || { echo NOROOT >&2; exit 3; }
+        [ "$(printf "%s\n" "$roots" | wc -l)" = 1 ] || { echo "MULTI $(printf "%s\n" "$roots" | tr "\n" " ")" >&2; exit 3; }
+        cd "$roots"
+        set -f   # 下の ._* をファイル名として展開させない
+        ex="--exclude=./vendor --exclude=./var --exclude=./node_modules --exclude=./app/proxy --exclude=./html/upload/temp_image --exclude=.git --exclude=__MACOSX --exclude=._* --exclude=.DS_Store"
+        # shellcheck disable=SC2086
+        if [ -n "$(find . \( -path ./vendor -o -path ./var -o -path ./node_modules \) -prune -o -type l -print | head -1)" ]; then
+            echo "SYMLINK $(find . \( -path ./vendor -o -path ./var -o -path ./node_modules \) -prune -o -type l -print | head -3 | tr "\n" " ")" >&2; exit 4
+        fi
+        [ -f .env ] || echo NOENV >&2
+        tar -cf - $ex .
+    ' sh "$kind" 2>"$err" | tar -xf - -C "$to"; then
+        local e; e="$(cat "$err")"; rm -f "$err"
+        case "$e" in
+            *BADNAME*) die "書庫に、外へ書き出そうとする名前（../ や / で始まるもの）が入っています。入れません" ;;
+            *NOROOT*)  die "EC-CUBE 4 が見つかりません（src/Eccube/Common/Constant.php が無い）: $in" ;;
+            *MULTI*)   die "EC-CUBE が 2 つ以上入っています。1 つだけにしてください: ${e#*MULTI }" ;;
+            *SYMLINK*) die "シンボリックリンクが入っています。入れません（リンク先を実物にして固め直してください）: ${e#*SYMLINK }" ;;
+            *)         die "展開できませんでした: ${e:-（理由不明）}" ;;
+        esac
+    fi
+    if grep -q NOENV "$err"; then
+        rm -f "$err"
+        die "EC-CUBE のフォルダに .env がありません。FTP ソフトは、点で始まるファイルを隠すことがあります（FileZilla は「サーバー → 隠しファイルを強制表示」）。
+         .env には全パスワードの鍵（ECCUBE_AUTH_MAGIC）と DB の接続先があり、無いと取り込めません"
+    fi
+    rm -f "$err"
+}
+
+# DB のダンプを、mysqldump / pg_dump の形（完了の行つき）にして <出力>.gz へ。決めるもの: dump_from・dump_server
+unpack_dump() { # unpack_dump <ダンプ> <DB の種類 mysql|postgresql> <出力 .sql.gz>
+    local in="$1" engine="$2" out="$3" abs
+    [ -f "$in" ] || die "ダンプがありません: $in"
+    abs="$(cd "$(dirname "$in")" && pwd)/$(basename "$in")"
+    dump_cat() {
+        case "$abs" in
+            *.zip) docker run --rm --network none -v "${abs}:/in/d.zip:ro" alpine:3 sh -c '
+                    n="$(unzip -l /in/d.zip 2>/dev/null | sed -nE "s/^ *[0-9]+ +[0-9-]+ +[0-9:]+ +//p" | grep -vE "/$|__MACOSX" | grep -E "\.sql(\.gz)?$")" || true
+                    [ "$(printf "%s\n" "$n" | grep -c .)" = 1 ] || { echo "zip の中に .sql（.sql.gz）がちょうど 1 つ要ります" >&2; exit 3; }
+                    case "$n" in *.gz) unzip -p /in/d.zip "$n" | gunzip -c ;; *) unzip -p /in/d.zip "$n" ;; esac' ;;
+            *.gz) gunzip -c "$abs" ;;
+            *) cat "$abs" ;;
+        esac
+    }
+    local head tail
+    head="$(dump_cat 2>/dev/null | head -c 8192 | head -40)" || true
+    tail="$(dump_cat | tail -c 2048)" || die "ダンプを読めませんでした: $in"
+    dump_server="$(printf '%s\n' "$head" | sed -nE 's/^-- .*(Server version|サーバのバージョン|サーバーのバージョン|Dumped from database version)[:：]?[[:space:]]*(.+)$/\2/p' | head -1 | tr -d '\r')"
+
+    case "$head" in
+        *"-- PostgreSQL database dump"*)
+            [ "$engine" = postgresql ] || die "ダンプは PostgreSQL ですが、店の .env の DATABASE_URL は MySQL / MariaDB です"
+            printf '%s' "$tail" | grep -q -- '-- PostgreSQL database dump complete' || die "ダンプが途中で切れています（完了の行がありません）。取り直してください"
+            dump_from=pg_dump; dump_cat | gzip -c > "$out"; return 0 ;;
+        *"-- MySQL dump"*|*"-- MariaDB dump"*)
+            [ "$engine" = mysql ] || die "ダンプは MySQL / MariaDB ですが、店の .env の DATABASE_URL は PostgreSQL です"
+            printf '%s' "$tail" | grep -q -- '-- Dump completed' || die "ダンプが途中で切れています（完了の行がありません）。取り直してください"
+            dump_from=mysqldump; dump_cat | gzip -c > "$out"; return 0 ;;
+        *"-- phpMyAdmin SQL Dump"*)
+            [ "$engine" = mysql ] || die "phpMyAdmin のダンプですが、店の .env の DATABASE_URL は PostgreSQL です"
+            # phpMyAdmin には完了の行が無い。既定の書き出しは最後に COMMIT と文字コードの戻しを書くので、それで見る
+            # （レンタルサーバーの phpMyAdmin は大きい DB で時間切れになり、途中で切れたファイルを正常に渡してくる）
+            printf '%s' "$tail" | grep -qE 'SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION|^COMMIT;[[:space:]]*$' \
+                || die "phpMyAdmin のダンプが途中で切れているようです（最後に COMMIT も文字コードの戻しもありません）。
+         大きい DB は phpMyAdmin が時間切れで途中までしか書かないことがあります。サーバーの管理画面の「MySQL バックアップ」
+         などの機能で取り直すか、gzip 圧縮で書き出してください"
+            dump_from=phpmyadmin ;;
+        *)
+            die "ダンプの形が分かりません（mysqldump・pg_dump・phpMyAdmin のどれかで書き出してください）。先頭:
+$(printf '%s\n' "$head" | head -3 | sed 's/^/         /')" ;;
+    esac
+
+    # phpMyAdmin のダンプは使い捨ての DB に入れて、mysqldump で取り直す。入りきるか、表がそろっているかもここで分かる
+    local img client dumper
+    case "$dump_server" in
+        *[Mm]aria[Dd][Bb]*) img=mariadb:10.11; client=mariadb; dumper=mariadb-dump ;;
+        *) img=mysql:8.0; client=mysql; dumper=mysqldump ;;
+    esac
+    need_image "$img" || die "DB のイメージを取れませんでした: $img"
+    local pw c
+    pw="$(openssl rand -hex 16)"
+    c="eccube-import-dump-$$"
+    dump_container="$c"   # cmd_unpack の EXIT が消す（die でも残さない）
+    log "phpMyAdmin のダンプを、使い捨ての DB（${img}）に入れて確かめます..."
+    docker run -d --name "$c" --network none -e MYSQL_ROOT_PASSWORD="$pw" -e MARIADB_ROOT_PASSWORD="$pw" \
+        -e MYSQL_DATABASE=shop -e MARIADB_DATABASE=shop "$img" --max-allowed-packet=1G >/dev/null \
+        || die "使い捨ての DB を起動できませんでした"
+    # 初回は一時のサーバー（port: 0）が先に立って落ちる。本物（port: 3306）が立つまで待つ
+    # pipefail の下で docker logs | grep -q にしない（grep が先に終わると SIGPIPE で「無い」になる）
+    local i=0 lg
+    while :; do
+        lg="$(docker logs "$c" 2>&1 || true)"
+        case "$lg" in *"port: 3306 "*) break ;; esac   # 33060（X プロトコル）を拾わないよう、後ろの空白まで見る
+        i=$((i + 1)); [ "$i" -lt 180 ] || die "使い捨ての DB が起動しません（docker logs ${c}）"; sleep 1
+    done
+    local lerr; lerr="$(mktemp)"
+    if ! dump_cat | sed -e '/^USE /d' -e '/^CREATE DATABASE /d' \
+        | docker exec -i -e MYSQL_PWD="$pw" "$c" "$client" -uroot --default-character-set=utf8mb4 --max-allowed-packet=1G shop 2>"$lerr"; then
+        local e; e="$(head -5 "$lerr")"; rm -f "$lerr"
+        die "ダンプを DB に入れられませんでした（${img}）:
+$(printf '%s\n' "$e" | sed 's/^/         /')"
+    fi
+    rm -f "$lerr"
+    local have
+    have="$(docker exec -e MYSQL_PWD="$pw" "$c" "$client" -uroot -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='shop' AND table_name IN ('dtb_base_info','dtb_customer','dtb_order','dtb_product','dtb_plugin','dtb_member')")"
+    [ "$have" = 6 ] || die "ダンプに EC-CUBE の表がそろっていません（${have}/6）。phpMyAdmin で一部の表だけを選んで書き出していませんか"
+    docker exec -e MYSQL_PWD="$pw" "$c" "$dumper" -uroot --default-character-set=utf8mb4 --single-transaction --quick \
+        --no-tablespaces --routines --triggers shop | gzip -c > "$out" || die "取り直せませんでした"
+    gunzip -c "$out" | tail -c 1024 | grep -q -- '-- Dump completed' || die "取り直したダンプに完了の行がありません"
+}
+
+cmd_unpack() {
+    local src="" dump="" name=""
+    for a in "$@"; do
+        case "$a" in
+            --dump=*) dump="${a#--dump=}" ;;
+            --name=*) name="${a#--name=}" ;;
+            -*) die "知らない指定です: $a" ;;
+            *) src="$a" ;;
+        esac
+    done
+    [ -n "$src" ] && [ -n "$dump" ] || die "使い方: bin/import.sh unpack <フォルダ | zip | tar.gz> --dump=<.sql | .sql.gz | .zip> [--name=<名前>]"
+    if [ -z "$name" ]; then
+        name="$(basename "${src%/}")"; name="${name%.zip}"; name="${name%.tar.gz}"; name="${name%.tgz}"; name="${name%.tar}"
+        name="$(printf '%s' "$name" | tr -c 'A-Za-z0-9._-' '_')"
+    fi
+    local dest="var/import/${name}"
+    mkdir -p var/import; chmod 700 var/import 2>/dev/null || true
+    local stage="${dest}.new"
+    rm -rf "$stage"; mkdir -p "$stage/files"; chmod 700 "$stage" "$stage/files"
+    dump_container=""
+    trap 'rm -rf "'"$stage"'"; [ -z "$dump_container" ] || docker rm -f "$dump_container" >/dev/null 2>&1 || true' EXIT
+
+    log "ファイルを整えます（vendor・キャッシュは除く）..."
+    unpack_files "$src" "$stage/files"
+    chmod 700 "$stage/files"
+    resolve_src "$stage" ""
+    local engine
+    case "$(sed -n 's/^DATABASE_URL=//p' "$src_base/.env" | tail -1 | tr -d "\"' \r")" in
+        mysql*) engine=mysql ;; pgsql*|postgres*) engine=postgresql ;;
+        "") die ".env に DATABASE_URL がありません" ;;
+        *) die "DB の種類が分かりません（DATABASE_URL）。キットは MySQL / MariaDB と PostgreSQL だけです" ;;
+    esac
+    [ -n "$(sed -n 's/^ECCUBE_AUTH_MAGIC=//p' "$src_base/.env" | tail -1 | tr -d "\"' \r")" ] \
+        || log "注意: .env に ECCUBE_AUTH_MAGIC がありません。取り込んでも誰もログインできません（店に確かめてください）"
+
+    log "DB のダンプを確かめます..."
+    dump_from=""; dump_server=""
+    unpack_dump "$dump" "$engine" "$stage/dump.sql.gz"
+    chmod 600 "$stage/dump.sql.gz"
+
+    local n kb
+    n="$(find "$stage/files/html/upload" -type f 2>/dev/null | wc -l | tr -d ' ')"
+    kb="$(du -sk "$stage/files/html/upload" 2>/dev/null | cut -f1)"
+    {
+        echo "source=archive"
+        echo "unpacked=$(date +%s)"
+        echo "dump_from=${dump_from}"
+        [ -z "$dump_server" ] || echo "db_server=${dump_server}"
+        echo "upload_files=${n:-0}"
+        echo "upload_kb=${kb:-0}"
+    } > "$stage/meta.env"
+    chmod 600 "$stage/meta.env"
+
+    # 入れ替え（前の診断の報告書は残す）
+    if [ -d "$dest" ]; then
+        rm -rf "$dest/files" "$dest/dump.sql.gz" "$dest/meta.env"
+        mv "$stage/files" "$stage/dump.sql.gz" "$stage/meta.env" "$dest/"
+        rm -rf "$stage"
+    else
+        mv "$stage" "$dest"
+    fi
+    trap - EXIT
+    [ -z "$dump_container" ] || docker rm -f "$dump_container" >/dev/null 2>&1 || true
+    echo
+    log "整えました: ${dest}（EC-CUBE ${src_ver}・DB は ${dump_from}${dump_server:+（${dump_server}）}・商品画像など ${n:-0} ファイル）"
+    [ "${n:-0}" != 0 ] || log "注意: 商品画像（html/upload）がありません。取り込み（load）の前に、html/upload も落としてください"
     log "次: bin/import.sh diagnose ${dest}"
 }
 
@@ -408,19 +633,32 @@ old_maint_path() { # old_maint_path <取ったフォルダの files> <元の店�
 }
 
 cmd_cutover() {
-    local src="" name="" old_url=""
+    local src="" name="" old_url="" from=""
     for a in "$@"; do
         case "$a" in
             --name=*) name="${a#--name=}" ;;
+            --from=*) from="${a#--from=}" ;;
             --old-url=*) old_url="${a#--old-url=}" ;;
             -*) die "知らない指定です: $a" ;;
             *) src="$a" ;;
         esac
     done
-    case "$src" in *:/*) ;; *) die "使い方: bin/import.sh cutover <ユーザー>@<ホスト>:<元の店のフォルダ> [--old-url=https://元の店/] [--name=<名前>]" ;; esac
-    local host="${src%%:*}" path="${src#*:}"; path="${path%/}"
-    [ -n "$name" ] || name="$(printf '%s' "${host#*@}" | tr -c 'A-Za-z0-9._-' '_')"
-    local dest="var/import/${name}"
+    # 2 つのやり方: SSH で入れる店はこちらで元の店を止めて取り直す。入れない店（--from）は人が止めて取り直し、unpack したものを渡す
+    local manual=0 host="" path="" dest
+    if [ -n "$from" ]; then
+        manual=1
+        [ -z "$src" ] || die "--from と <ユーザー>@<ホスト>:<フォルダ> は一緒に使えません"
+        [ -n "$old_url" ] || die "--from のときは --old-url=https://元の店/ が要ります（元の店が本当に止まっているかを、それで確かめます）"
+        dest="${from%/}"
+        [ -f "$dest/meta.env" ] && [ -f "$dest/dump.sql.gz" ] || die "${dest} は bin/import.sh unpack で整えたフォルダではありません"
+        name="$(basename "$dest")"
+    else
+        case "$src" in *:/*) ;; *) die "使い方: bin/import.sh cutover <ユーザー>@<ホスト>:<元の店のフォルダ> [--old-url=https://元の店/] [--name=<名前>]
+         SSH が使えない店: bin/import.sh cutover --from=var/import/<名前> --old-url=https://元の店/" ;; esac
+        host="${src%%:*}"; path="${src#*:}"; path="${path%/}"
+        [ -n "$name" ] || name="$(printf '%s' "${host#*@}" | tr -c 'A-Za-z0-9._-' '_')"
+        dest="var/import/${name}"
+    fi
 
     # ── このキット（本番）が、切り替えられる状態か ──
     [ -f .env ] || die ".env がありません。本番のサーバーで、リハーサルを済ませたリポジトリから bin/init.sh してください"
@@ -436,27 +674,61 @@ cmd_cutover() {
         case "$mailer" in ""|null://*|*mailpit*) die "本番なのに .env の MAILER_DSN が無い（または Mailpit）です。切り替えた瞬間から注文メールが届かなくなるので、先に書いてください" ;; esac
     fi
 
-    log "切り替えの前に、元の店から取ってきます（元の店はまだ営業中。差分を小さくしておくため）..."
-    cmd_fetch "${host}:${path}" --name="$name" --full >/dev/null
+    if [ "$manual" = 0 ]; then
+        log "切り替えの前に、元の店から取ってきます（元の店はまだ営業中。差分を小さくしておくため）..."
+        cmd_fetch "${host}:${path}" --name="$name" --full >/dev/null
+    fi
     resolve_src "$dest" ""
-    [ -f "$src_base/index.php" ] && grep -q 'maintenanceFile' "$src_base/index.php" \
-        || die "元の店（EC-CUBE ${src_ver}）の index.php が、ファイルでのメンテナンス表示に対応していません"
+    [ -n "$src_dump" ] || die "DB のダンプがありません（${dest}）"
+    if [ "$manual" = 0 ]; then
+        [ -f "$src_base/index.php" ] && grep -q 'maintenanceFile' "$src_base/index.php" \
+            || die "元の店（EC-CUBE ${src_ver}）の index.php が、ファイルでのメンテナンス表示に対応していません"
+    else
+        [ -n "$(find "$src_base/html/upload/save_image" -type f 2>/dev/null | head -1)" ] \
+            || die "商品画像（html/upload）がありません。FTP で html/upload も落として、unpack し直してください"
+    fi
     [ "$(printf '%s\n%s\n' "$src_series" "$(printf '%s' "$kit_ver" | cut -d. -f1-2)" | sort -V | head -1)" = "$src_series" ] \
         || die "キットの EC-CUBE（${kit_ver}）が元の店（${src_ver}）より古いです"
+    # 合わせる先は**いま動いている版の系列**。配布イメージの環境では .env の ECCUBE_VERSION は使われず、動いている版と
+    # ずれていることがある（4.2 で動いているのに ~4.3.0 と書かれていて、切り替えのついでに 4.3 へ上げようとした。試験で踏んだ）
+    local kit_series constraint
+    kit_series="$(printf '%s' "$kit_ver" | cut -d. -f1-2)"
+    if [ -n "$(env_get ECCUBE_IMAGE)" ]; then
+        constraint="~${kit_series}.0"
+    else
+        constraint="$(env_get ECCUBE_VERSION)"; constraint="${constraint:-$kit_ver}"
+        [ "$(image_series "$constraint")" = "$kit_series" ] \
+            || die ".env の ECCUBE_VERSION（${constraint}）が、動いている EC-CUBE（${kit_ver}）と系列が違います。切り替えで版は変えません。.env を直してから"
+    fi
     local magic_old magic_now
     magic_old="$(sed -n 's/^ECCUBE_AUTH_MAGIC=//p' "$src_base/.env" | tail -1 | tr -d "\"' \r")"
     magic_now="$(env_get ECCUBE_AUTH_MAGIC)"
     [ -n "$magic_old" ] || die "元の店の .env に ECCUBE_AUTH_MAGIC がありません"
     local theme; theme="$(sed -n 's/^ECCUBE_TEMPLATE_CODE=//p' "$src_base/.env" 2>/dev/null | tail -1 | tr -d "\"' \r")"
     case "${theme:-default}" in default) theme="" ;; esac
-    local mfile; mfile="$(old_maint_path "$src_base" "$path")"
+    local mfile=""
+    [ "$manual" = 1 ] || mfile="$(old_maint_path "$src_base" "$path")"
 
     echo
-    log "切り替えます: 元の店 ${host}:${path}（EC-CUBE ${src_ver}）→ このキット（${proj}・EC-CUBE ${kit_ver}）"
-    log "  1. 元の店をメンテナンス表示にする（${mfile}）。**ここからお客さんは注文できません**"
-    log "  2. 元の店から、変わった分のファイルと DB を取り直す"
-    log "  3. このキットの DB・画像を、元の店のもので置き換え、bin/upgrade.sh で EC-CUBE ${kit_ver} に合わせる"
-    log "  4. 開くか確かめる。**ここまでのどこかで失敗したら、元の店のメンテナンス表示を外して営業に戻す**"
+    if [ "$manual" = 1 ]; then
+        local at; at="$(sed -n 's/^unpacked=//p' "$dest/meta.env" | head -1)"
+        local age=$(( $(date +%s) - ${at:-0} ))
+        log "切り替えます: 元の店（${old_url}・EC-CUBE ${src_ver}。${dest} に整えたもの）→ このキット（${proj}・EC-CUBE ${kit_ver}）"
+        log "  **元の店は、あなたが管理画面でメンテナンス表示にしてあり、ファイルと DB はそのあとで取ったもの**として進めます"
+        log "  （その前に取ったものだと、そのあとに入った注文・会員登録が消えます）"
+        [ "$age" -lt 7200 ] || log "  注意: ${dest} を整えたのは $((age / 3600)) 時間前です。メンテナンス表示にしたあとで取り直したものか、確かめてください"
+    else
+        log "切り替えます: 元の店 ${host}:${path}（EC-CUBE ${src_ver}）→ このキット（${proj}・EC-CUBE ${kit_ver}）"
+        log "  1. 元の店をメンテナンス表示にする（${mfile}）。**ここからお客さんは注文できません**"
+        log "  2. 元の店から、変わった分のファイルと DB を取り直す"
+        log "  3. このキットの DB・画像を、元の店のもので置き換え、bin/upgrade.sh で EC-CUBE ${kit_ver} に合わせる"
+        log "  4. 開くか確かめる。**ここまでのどこかで失敗したら、元の店のメンテナンス表示を外して営業に戻す**"
+    fi
+    if [ "$manual" = 1 ]; then
+        log "  1. 元の店（${old_url}）がメンテナンス画面（503）かを確かめる。なっていなければ何もせずに止まる"
+        log "  2. このキットの DB・画像を、整えたもので置き換え、bin/upgrade.sh で EC-CUBE ${kit_ver} に合わせる"
+        log "  3. 開くか確かめる。失敗したら止まる（元の店のメンテナンス表示は、あなたが管理画面で外す）"
+    fi
     log "  コード（app/Customize・テーマ・プラグイン）は、このリポジトリのもの（リハーサルで直したもの）を使います"
     [ "$magic_old" = "$magic_now" ] || log "  .env の ECCUBE_AUTH_MAGIC を元の店の値にします"
     local ans
@@ -466,8 +738,13 @@ cmd_cutover() {
     # ── 1. 元の店をメンテナンス表示に。ここから先の失敗は、元の店を開け直す ──
     # tr < /dev/urandom | head にしない（pipefail が tr の SIGPIPE を失敗と数え、何も言わずに終わる。試験で踏んだ）
     local token; token="$(openssl rand -hex 12)"
-    local mine=0 reopened=0
+    local mine=0 reopened=0 old_down=0
     reopen_old() {
+        if [ "$manual" = 1 ]; then
+            [ "$old_down" = 1 ] || return 0   # 止まっているのを確かめる前の失敗。元の店には何も起きていない
+            echo "[import] **元の店は止まったままです。営業に戻すなら、元の店の管理画面でメンテナンス表示を外してください。**" >&2
+            return 0
+        fi
         [ "$mine" = 1 ] && [ "$reopened" = 0 ] || return 0
         # shellcheck disable=SC2029
         if ssh -n -o BatchMode=yes "$host" "[ \"\$(cat '${mfile}' 2>/dev/null)\" = 'import:${token}' ] && rm -f '${mfile}'"; then
@@ -481,26 +758,36 @@ cmd_cutover() {
     trap 'rc=$?; if [ "$rc" != 0 ]; then echo "[import] 切り替えに失敗しました。" >&2; reopen_old
         if [ -n "$kit_backup" ]; then echo "[import] このキットは途中の状態です（公開前）。切り替える前に戻すなら: bin/restore.sh ${kit_backup}" >&2; fi; fi' EXIT
     trap 'exit 130' INT TERM
-    local had
-    # shellcheck disable=SC2029
-    had="$(ssh -n -o BatchMode=yes "$host" "if [ -e '${mfile}' ]; then echo had; else printf '%s' 'import:${token}' > '${mfile}' && echo put; fi")" \
-        || die "元の店をメンテナンス表示にできませんでした（${mfile} に書けない？）。何も変えていません"
-    case "$had" in
-        put) mine=1; log "元の店をメンテナンス表示にしました" ;;
-        had) log "元の店はもうメンテナンス表示です（店が入れたもの。終わっても外しません）" ;;
-        *) die "元の店をメンテナンス表示にできませんでした" ;;
-    esac
+    if [ "$manual" = 0 ]; then
+        local had
+        # shellcheck disable=SC2029
+        had="$(ssh -n -o BatchMode=yes "$host" "if [ -e '${mfile}' ]; then echo had; else printf '%s' 'import:${token}' > '${mfile}' && echo put; fi")" \
+            || die "元の店をメンテナンス表示にできませんでした（${mfile} に書けない？）。何も変えていません"
+        case "$had" in
+            put) mine=1; log "元の店をメンテナンス表示にしました" ;;
+            had) log "元の店はもうメンテナンス表示です（店が入れたもの。終わっても外しません）" ;;
+            *) die "元の店をメンテナンス表示にできませんでした" ;;
+        esac
+    fi
     if [ -n "$old_url" ]; then
         local code; code="$(curl -s -o /dev/null -w '%{http_code}' "$old_url" || true)"
-        [ "$code" = 503 ] || die "元の店（${old_url}）がメンテナンス画面になっていません（${code}）。注文が入り続けるので止めます"
+        if [ "$code" != 503 ]; then
+            [ "$manual" = 1 ] && die "元の店（${old_url}）がメンテナンス画面になっていません（${code}）。何も変えていません。
+         元の店の管理画面（コンテンツ管理 → メンテナンス管理）で有効にし、**そのあとで**ファイルと DB を取り直して
+         bin/import.sh unpack し直してから、もう一度打ってください（自分のブラウザは素通りするので、503 は別の端末で確かめる）"
+            die "元の店（${old_url}）がメンテナンス画面になっていません（${code}）。注文が入り続けるので止めます"
+        fi
+        old_down=1
         log "元の店がメンテナンス画面（503）になったのを確かめました"
     fi
 
-    # ── 2. 取り直す（変わった分だけ） ──
-    log "元の店から、変わった分のファイルと DB を取り直します..."
-    cmd_fetch "${host}:${path}" --name="$name" --full >/dev/null
-    resolve_src "$dest" ""
-    [ -n "$src_dump" ] || die "DB をダンプできませんでした"
+    # ── 2. 取り直す（変わった分だけ）。--from は人が取り直して unpack 済み ──
+    if [ "$manual" = 0 ]; then
+        log "元の店から、変わった分のファイルと DB を取り直します..."
+        cmd_fetch "${host}:${path}" --name="$name" --full >/dev/null
+        resolve_src "$dest" ""
+        [ -n "$src_dump" ] || die "DB をダンプできませんでした"
+    fi
 
     # ── 3. データだけ流し込み、上げる ──
     local pristine; pristine="$(get_pristine "$src_ver")"
@@ -536,9 +823,8 @@ cmd_cutover() {
     tar -xzf "$out/admin-files.tar.gz" || die "ページ（app/template/user_data）を入れられませんでした"
 
     log "EC-CUBE ${kit_ver} に合わせます（bin/upgrade.sh。スキーマの更新・migration。失敗したら自動で戻ります）..."
-    local constraint; constraint="$(env_get ECCUBE_VERSION)"
     # 確認（取ったイメージで続けるか）には y で答える。`yes |` にすると pipefail が yes の SIGPIPE を失敗と数える
-    bin/upgrade.sh "${constraint:-$kit_ver}" $prod < <(yes y) > "$out/upgrade.log" 2>&1 \
+    bin/upgrade.sh "$constraint" $prod < <(yes y) > "$out/upgrade.log" 2>&1 \
         || { tail -20 "$out/upgrade.log" >&2; die "上げられませんでした（${out}/upgrade.log）"; }
     log "プラグインの版を DB に合わせます（bin/plugin.sh sync）..."
     bin/plugin.sh sync > "$out/plugin-sync.log" 2>&1 || { tail -20 "$out/plugin-sync.log" >&2; die "プラグインを合わせられませんでした（${out}/plugin-sync.log）"; }
@@ -557,7 +843,12 @@ cmd_cutover() {
     log "  3) 決済会社に、通知の URL と新しいサーバーの IP を登録する（診断の「店に確かめること」）"
     local crons; crons="$(sed -n 's/^cron=//p' "$dest/meta.env" 2>/dev/null)"
     [ -z "$crons" ] || { log "  4) 元のサーバーの cron を止める:"; printf '%s\n' "$crons" | sed 's/^/       /'; }
-    log "  やめて元の店に戻すなら（このキットで注文を受ける前だけ）: ssh ${host} rm '${mfile}'"
+    if [ "$manual" = 1 ]; then
+        log "  4) 元のサーバーの cron（レンタルサーバーの管理画面の「cron 設定」）を止める"
+        log "  やめて元の店に戻すなら（このキットで注文を受ける前だけ）: 元の店の管理画面でメンテナンス表示を外す"
+    else
+        log "  やめて元の店に戻すなら（このキットで注文を受ける前だけ）: ssh ${host} rm '${mfile}'"
+    fi
     log "  git status で、ページ（app/template/user_data）の変更をコミットしてください"
 }
 
@@ -565,6 +856,7 @@ case "$1" in
     cutover) shift; cmd_cutover "$@" ;;
     load) shift; cmd_load "$@" ;;
     fetch) shift; cmd_fetch "$@" ;;
+    unpack) shift; cmd_unpack "$@" ;;
     diagnose) shift; cmd_diagnose "$@" ;;
-    *) die "知らないコマンドです: $1（fetch / diagnose / load / cutover）" ;;
+    *) die "知らないコマンドです: $1（fetch / unpack / diagnose / load / cutover）" ;;
 esac
