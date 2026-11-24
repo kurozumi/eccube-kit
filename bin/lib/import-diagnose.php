@@ -17,6 +17,8 @@ const FROM = '/from';
 const TO = '/var/www/html';
 const OUT = '/out';
 
+require __DIR__ . '/import-dump.php';
+
 $to_ver = $argv[1] ?? '?';
 
 function rel_files(string $root, string $sub = ''): array
@@ -116,7 +118,7 @@ $plugin_rows = [];
 if ($dump) {
     $dump_info['bytes'] = filesize($dump);
     $h = str_ends_with($dump, '.gz') ? gzopen($dump, 'r') : fopen($dump, 'r');
-    $cols = null; $in_copy = false;
+    $pr = new DumpPluginRows();
     while (($l = (str_ends_with($dump, '.gz') ? gzgets($h) : fgets($h))) !== false) {
         if ($dump_info['server'] === null && preg_match('/^-- (?:Server version|Dumped from database version)\s+(.+)$/', rtrim($l), $m)) {
             $dump_info['server'] = trim($m[1]);
@@ -126,39 +128,9 @@ if ($dump) {
         $dump_info['c0900'] += substr_count($l, '_0900_');
         if (str_contains($l, 'DEFINER=')) $dump_info['definer']++;
         if (preg_match('/^CREATE\s+(?:DEFINER\S*\s+)?(?:TRIGGER|PROCEDURE|FUNCTION|EVENT)\b/i', $l) || preg_match('/\b(?:TRIGGER|PROCEDURE|FUNCTION)\b.*\bBEGIN\b/i', $l)) $dump_info['routines']++;
-        // dtb_plugin の列（MySQL: CREATE TABLE、PostgreSQL: COPY の見出し）
-        if (preg_match('/^CREATE TABLE [`"]?(?:public\.)?dtb_plugin[`"]? \(/', $l)) { $cols = []; continue; }
-        if (is_array($cols) && !$in_copy && preg_match('/^\s+[`"]?(\w+)[`"]?\s+\w/', $l, $m) && !preg_match('/^\s+(PRIMARY|UNIQUE|KEY|CONSTRAINT|INDEX)\b/', $l)) { $cols[] = $m[1]; continue; }
-        if (preg_match('/^INSERT INTO [`"]?dtb_plugin[`"]? (?:\(([^)]*)\) )?VALUES (.*);\s*$/s', $l, $m)) {
-            $c = $m[1] ? array_map(fn($x) => trim($x, " `\""), explode(',', $m[1])) : $cols;
-            foreach (sql_tuples($m[2]) as $t) $plugin_rows[] = array_combine(array_slice($c, 0, count($t)), $t);
-        }
-        if (preg_match('/^COPY (?:public\.)?dtb_plugin \(([^)]*)\) FROM stdin;/', $l, $m)) { $cols = array_map('trim', explode(',', $m[1])); $in_copy = true; continue; }
-        if ($in_copy) {
-            if (rtrim($l) === '\.') { $in_copy = false; continue; }
-            $t = array_map(fn($x) => $x === '\N' ? null : $x, explode("\t", rtrim($l, "\n")));
-            $plugin_rows[] = array_combine(array_slice($cols, 0, count($t)), $t);
-        }
+        $pr->feed($l);
     }
-}
-
-function sql_tuples(string $s): array
-{
-    $rows = []; $row = []; $cur = ''; $inq = false; $depth = 0; $len = strlen($s);
-    for ($i = 0; $i < $len; $i++) {
-        $ch = $s[$i];
-        if ($inq) {
-            if ($ch === '\\') { $cur .= $s[++$i] ?? ''; continue; }
-            if ($ch === "'") { if (($s[$i + 1] ?? '') === "'") { $cur .= "'"; $i++; continue; } $inq = false; continue; }
-            $cur .= $ch; continue;
-        }
-        if ($ch === "'") { $inq = true; continue; }
-        if ($ch === '(') { $depth++; if ($depth === 1) { $row = []; $cur = ''; continue; } }
-        if ($ch === ')') { $depth--; if ($depth === 0) { $row[] = $cur === 'NULL' ? null : $cur; $rows[] = $row; $cur = ''; continue; } }
-        if ($ch === ',' && $depth === 1) { $row[] = $cur === 'NULL' ? null : $cur; $cur = ''; continue; }
-        if ($depth >= 1) $cur .= $ch;
-    }
-    return $rows;
+    $plugin_rows = $pr->rows;
 }
 
 // ---------------------------------------------------------------- 本体の書き換え
@@ -277,7 +249,7 @@ foreach ($plugin_rows as $r) {
     if ($code === null) continue;
     $plugins[$code] ??= ['dir' => null, 'name' => $r['name'] ?? $code, 'version' => '?', 'db' => null, 'enabled' => null, 'git' => false];
     $plugins[$code]['db'] = $r['version'] ?? '?';
-    $plugins[$code]['enabled'] = in_array((string) ($r['enabled'] ?? ''), ['1', 't', 'true'], true);
+    $plugins[$code]['enabled'] = DumpPluginRows::enabled($r);
 }
 ksort($plugins);
 
