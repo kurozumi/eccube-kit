@@ -82,6 +82,7 @@ ENV_PATHS=(
     .eccube-docker-paths
     .gitignore
     LICENSE
+    LICENSE-GPL
     README.md
     CLAUDE.md
     VERSION
