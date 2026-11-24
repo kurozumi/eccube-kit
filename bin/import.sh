@@ -20,10 +20,15 @@
 #       流し込む。元の店をバックアップの形（backups/<日時>-import-<名前>/）に詰め直し、bin/restore.sh で入れる。
 #       ECCUBE_AUTH_MAGIC・管理画面の URL・テーマは引き継ぎ、メールの送り先は引き継がない（検証から本物のお客さんへ
 #       メールが出ないように）。本体を直接書き換えた箇所は運ばない（diagnose の core.patch を見て app/Customize へ）。
+#   bin/import.sh plugins pack
+#       リハーサルの環境で。git に入らない app/Plugin のプラグインを .git 抜きで固める（var/import/plugins-<日時>.tar.gz）。
+#   bin/import.sh plugins add <書庫>
+#       本番のキットで。上の書庫を確かめて app/Plugin に置く（置くだけ。DB は cutover が元の店のものを入れる）。
 #   bin/import.sh cutover <ユーザー>@<ホスト>:<フォルダ> [--old-url=https://元の店/]
 #       本番の切り替え。**リハーサル（load → 直す → upgrade）を済ませ、そのリポジトリで動いている本番のキット**で打つ。
 #       元の店をメンテナンス表示にし、変わった分と DB を取り直し、データだけ（DB・画像・PluginData・ページ）を入れて
 #       bin/upgrade.sh でこのキットの版に合わせる。コードはこのリポジトリのものを使う。
+#       元の店の DB で有効なプラグインが app/Plugin に無ければ、元の店を止める前に止まる（plugins pack / add で運ぶ）。
 #       **途中で失敗したら、元の店のメンテナンス表示を外して営業に戻す。** DNS の向け替えは人がやる。
 #   bin/import.sh cutover --from=var/import/<名前> --old-url=https://元の店/
 #       SSH が使えない店の切り替え。人が元の店の管理画面でメンテナンス表示にし、ファイルと DB を取り直して unpack した
@@ -479,7 +484,7 @@ cmd_diagnose() {
     local summary
     summary="$(docker run --rm --user "$(id -u):$(id -g)" \
         -v "$base:/old:ro" -v "$pristine:/from:ro" -v "$out:/out" \
-        -v "$PWD/bin/lib/import-diagnose.php:/kit/diagnose.php:ro" \
+        -v "$PWD/bin/lib/import-diagnose.php:/kit/diagnose.php:ro" -v "$PWD/bin/lib/import-dump.php:/kit/import-dump.php:ro" \
         ${dumpmount[@]+"${dumpmount[@]}"} ${metamount[@]+"${metamount[@]}"} \
         --entrypoint php "$to_img" -d memory_limit=1G /kit/diagnose.php "$to")" || die "報告書を作れませんでした"
 
@@ -623,6 +628,153 @@ $(printf '%s\n' "$stops" | sed 's/^/         ・/')"
     log "元の店の DB と画像は ${out} にもあります（個人情報。終わったら消す）"
 }
 
+# ---------------------------------------------------------------- plugins
+# 買ったプラグインは git に入らない（app/Plugin/* は .gitignore）。リハーサルで作者の対応版に入れ替えたものを、
+# 本番のキットへそのまま運ぶ。backup.sh の admin-files.tar.gz は app/template・html/user_data も含むので、
+# それを本番で広げると本番のファイルを上書きする。プラグインだけを固め、入れる側で中身を確かめる。
+cmd_plugins() {
+    local sub="${1:-}"; [ $# -eq 0 ] || shift
+    case "$sub" in
+        pack) plugins_pack "$@" ;;
+        add) plugins_add "$@" ;;
+        *) die "使い方: bin/import.sh plugins pack（リハーサルの環境で）| bin/import.sh plugins add <書庫>（本番のキットで）" ;;
+    esac
+}
+
+plugin_version() { # plugin_version <app/Plugin/<コード>>
+    sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1/composer.json" 2>/dev/null | head -1
+}
+
+plugins_pack() {
+    [ $# -eq 0 ] || die "plugins pack は引数を取りません（app/Plugin のプラグインを全部固めます）"
+    local codes=() d c
+    for d in app/Plugin/*/; do
+        [ -f "${d}composer.json" ] || continue
+        c="$(basename "$d")"
+        case "$c" in *[!A-Za-z0-9_]*) continue ;; esac
+        codes+=("$c")
+    done
+    [ "${#codes[@]}" -gt 0 ] || die "app/Plugin にプラグインがありません"
+    local links; links="$(cd app/Plugin && find "${codes[@]}" -name .git -prune -o -type l -print | head -3)"
+    [ -z "$links" ] || die "シンボリックリンクがあります。入れる側で止まるので、実物にしてから:
+$(printf '%s\n' "$links" | sed 's#^#         app/Plugin/#')"
+    local tmp; tmp="$(mktemp -d)"
+    for c in "${codes[@]}"; do
+        printf '%s\t%s\t%s\n' "$c" "$(plugin_version "app/Plugin/$c")" "$(git -C "app/Plugin/$c" remote get-url origin 2>/dev/null || echo -)"
+    done > "$tmp/plugins.txt"
+    mkdir -p var/import
+    local out; out="var/import/plugins-$(date +%Y%m%d-%H%M%S).tar.gz"
+    # .git は運ばない（重いうえ、本番で git の操作はしない。remote は plugins.txt に控える）
+    ( umask 077; COPYFILE_DISABLE=1 tar -czf "$out" --exclude='.git' --exclude='._*' --exclude='.DS_Store' \
+        -C "$tmp" plugins.txt -C "$PWD/app/Plugin" "${codes[@]}" ) || { rm -rf "$tmp"; die "固められませんでした"; }
+    rm -rf "$tmp"
+    log "app/Plugin のプラグイン ${#codes[@]} 本を固めました: ${out}（$(du -h "$out" | cut -f1 | tr -d ' ')）"
+    for c in "${codes[@]}"; do
+        local v; v="$(plugin_version "app/Plugin/$c")"
+        if [ -n "$(git -C "app/Plugin/$c" status --porcelain 2>/dev/null)" ]; then
+            log "  ${c} ${v:-?}（コミットしていない変更があります。それも入っています）"
+        else
+            log "  ${c} ${v:-?}"
+        fi
+    done
+    log "本番のサーバーへ写して、本番のキットで:"
+    log "  scp ${out} <本番>:<キット>/var/import/"
+    log "  bin/import.sh plugins add var/import/$(basename "$out")"
+    log "買ったプラグインは、作者のライセンスの範囲で運んでください（同じ店の本番へ移すのは、ふつう範囲の内です）"
+}
+
+plugins_add() {
+    local in="${1:-}"
+    [ $# -eq 1 ] && [ -f "$in" ] || die "使い方: bin/import.sh plugins add <bin/import.sh plugins pack で作った書庫>"
+    case "$in" in *.tar.gz|*.tgz) ;; *) die "plugins pack で作った .tar.gz を渡してください: $in" ;; esac
+    local abs; abs="$(cd "$(dirname "$in")" && pwd)/$(basename "$in")"
+    mkdir -p app/Plugin
+    local stage; stage="app/Plugin/.import-$$"
+    local err; err="$(mktemp)"
+    trap 'rm -rf "'"$stage"'" "'"$err"'"' EXIT
+    mkdir "$stage"
+    # 書庫は使い捨てのコンテナで開く。busybox の tar は ../ や先頭の / を黙って削って続ける（標準エラーに 1 行出すだけ）
+    if ! docker run --rm --network none --user "$(id -u):$(id -g)" -v "${abs}:/in/pkg:ro" alpine:3 sh -c '
+        set -e
+        names="$(tar -tzf /in/pkg 2>&1 || true)"
+        if printf "%s\n" "$names" | grep -qE "removing leading|(^/|(^|/)\.\.(/|$))"; then echo BADNAME >&2; exit 5; fi
+        printf "%s\n" "$names" | grep -qx "plugins.txt" || { echo NOMANIFEST >&2; exit 3; }
+        mkdir -p /tmp/w && cd /tmp/w && tar -xzf /in/pkg
+        # macOS の tar が足す AppleDouble（._*）と .DS_Store は捨てる
+        find . \( -name "._*" -o -name .DS_Store \) -exec rm -rf {} +
+        l="$(find . -type l | head -3 | tr "\n" " ")"
+        [ -z "$l" ] || { echo "SYMLINK $l" >&2; exit 4; }
+        for d in $(ls -A); do
+            [ "$d" = plugins.txt ] && continue
+            case "$d" in *[!A-Za-z0-9_]*) echo "BADCODE $d" >&2; exit 6 ;; esac
+            [ -f "$d/composer.json" ] || { echo "BADCODE $d" >&2; exit 6; }
+        done
+        tar -cf - .
+    ' 2>"$err" | tar -xf - -C "$stage"; then
+        local e; e="$(cat "$err")"
+        case "$e" in
+            *BADNAME*)    die "書庫に、外へ書き出そうとする名前（../ や / で始まるもの）が入っています。入れません" ;;
+            *NOMANIFEST*) die "bin/import.sh plugins pack で作った書庫ではありません（plugins.txt が無い）" ;;
+            *SYMLINK*)    die "シンボリックリンクが入っています。入れません: ${e#*SYMLINK }" ;;
+            *BADCODE*)    die "プラグインではないものが入っています（app/Plugin/<コード>/composer.json の形でない）: ${e#*BADCODE }" ;;
+            *)            die "展開できませんでした: ${e:-（理由不明）}" ;;
+        esac
+    fi
+    # 先に全部見てから入れる。違う中身のものが 1 つでもあれば、何も入れない
+    local d c add=() same=() differ=()
+    for d in "$stage"/*/; do
+        c="$(basename "$d")"
+        if [ ! -e "app/Plugin/$c" ]; then add+=("$c")
+        elif diff -rq -x .git "app/Plugin/$c" "$stage/$c" >/dev/null 2>&1; then same+=("$c")
+        else differ+=("$c"); fi
+    done
+    if [ "${#differ[@]}" -gt 0 ]; then
+        die "このキットにもう入っていて、中身が違うプラグインがあります。何も入れていません:
+$(printf '         app/Plugin/%s\n' "${differ[@]}")
+         書庫のほうを入れるなら、そのフォルダを外へ移してから、もう一度（中身を確かめる: diff -r app/Plugin/<コード> <書庫を広げたもの>）"
+    fi
+    [ "${#add[@]}" -gt 0 ] || { log "書庫のプラグインは全部、同じ中身でもう入っています（${#same[@]} 本）。何も変えていません"; return 0; }
+    for c in "${add[@]}"; do
+        mv "$stage/$c" "app/Plugin/$c" || die "app/Plugin/$c に入れられませんでした（入れ終わったもの: ${add[*]}）"
+    done
+    log "プラグイン ${#add[@]} 本を app/Plugin に入れました:"
+    for c in "${add[@]}"; do log "  ${c} $(plugin_version "app/Plugin/$c")"; done
+    [ "${#same[@]}" -eq 0 ] || log "同じ中身でもう入っていたもの: ${same[*]}"
+    log "ファイルを置いただけです（DB にはまだ入れていません）。切り替え（bin/import.sh cutover）が元の店の DB を入れ、"
+    log "bin/plugin.sh sync が版を合わせます。cutover は、元の店で有効なプラグインがここにそろっているかを、元の店を止める前に確かめます"
+}
+
+# 元の店の DB（ダンプ）の dtb_plugin と、このキットの app/Plugin を突き合わせる。
+# 結果: plug_missing_on（有効なのに無い）/ plug_missing_off（無効で無い）/ plug_update（コード 古い版 新しい版）/ plug_extra（DB に無い）
+plugins_check() { # plugins_check <ダンプ> <イメージ>
+    local dump="$1" img="$2" dmount res
+    case "$dump" in *.gz) dmount="${dump}:/dump/dump.sql.gz:ro" ;; *) dmount="${dump}:/dump/dump.sql:ro" ;; esac
+    mkdir -p app/Plugin
+    res="$(docker run --rm --network none --user "$(id -u):$(id -g)" -v "$dmount" -v "$PWD/app/Plugin:/plugin:ro" \
+        -v "$PWD/bin/lib/import-dump.php:/kit-dump.php:ro" --entrypoint php "$img" -d memory_limit=512M /kit-dump.php)" \
+        || die "元の店の DB のダンプから、プラグインの一覧を読めませんでした。何も変えていません"
+    plug_missing_on="$(printf '%s\n' "$res" | awk -F'\t' '$1 ~ /^MISSING=/ && $2 == 1 { sub(/^MISSING=/, "", $1); print $1 }')"
+    plug_missing_off="$(printf '%s\n' "$res" | awk -F'\t' '$1 ~ /^MISSING=/ && $2 == 0 { sub(/^MISSING=/, "", $1); print $1 }')"
+    plug_update="$(printf '%s\n' "$res" | awk -F'\t' '$1 ~ /^UPDATE=/ { sub(/^UPDATE=/, "", $1); print $1 " " $2 " → " $3 }')"
+    plug_extra="$(printf '%s\n' "$res" | sed -n 's/^EXTRA=//p')"
+}
+
+plugins_missing_die() { # plugins_missing_die <ssh-before | ssh-after | manual>
+    local how
+    case "$1" in
+        ssh-before) how="無効にしてから、もう一度。**何も変えていません**（元の店はまだ営業中）" ;;
+        ssh-after)  how="無効にしてから、もう一度（先に取ってから止めるまでの間に、元の店で足されたものです）" ;;
+        *)          how="無効にし、ファイルと DB を取り直して unpack し直してから、もう一度。**何も変えていません**
+         （元の店のメンテナンス表示はそのまま。営業に戻すなら、元の店の管理画面で外す）" ;;
+    esac
+    die "元の店で有効なプラグインのうち、このキットの app/Plugin に無いものがあります:
+$(printf '%s\n' "$plug_missing_on" | sed 's/^/         ・/')
+         このまま入れると、元の店の DB は「有効」と言うのにファイルが無く、画面が落ちます。
+         - リハーサルの環境で bin/import.sh plugins pack → できた書庫を本番へ写し、bin/import.sh plugins add <書庫>
+         - リハーサルで外した（別のプラグインに替えた）ものなら、元の店の管理画面（オーナーズストア → プラグイン一覧）で
+           ${how}"
+}
+
 # ---------------------------------------------------------------- cutover
 # 元の店のメンテナンス表示。EC-CUBE 4 の index.php は、.maintenance（または ECCUBE_MAINTENANCE_FILE_PATH）があれば
 # 「モード:トークン」のトークンを cookie に持つ人以外へメンテナンス画面を出す。**自分で置いたものだけを外す**
@@ -708,6 +860,12 @@ cmd_cutover() {
     case "${theme:-default}" in default) theme="" ;; esac
     local mfile=""
     [ "$manual" = 1 ] || mfile="$(old_maint_path "$src_base" "$path")"
+    # 買ったプラグインは git に無いので、このリポジトリを clone しただけの本番には無い（plugins pack / add で運ぶ）。
+    # 元の店を止める前に、元の店で有効なものがそろっているかを見る
+    local img; img="$(docker inspect -f '{{.Config.Image}}' "$cid")"
+    local plug_missing_on plug_missing_off plug_update plug_extra
+    plugins_check "$src_dump" "$img"
+    if [ -n "$plug_missing_on" ]; then [ "$manual" = 1 ] && plugins_missing_die manual; plugins_missing_die ssh-before; fi
 
     echo
     if [ "$manual" = 1 ]; then
@@ -730,6 +888,12 @@ cmd_cutover() {
         log "  3. 開くか確かめる。失敗したら止まる（元の店のメンテナンス表示は、あなたが管理画面で外す）"
     fi
     log "  コード（app/Customize・テーマ・プラグイン）は、このリポジトリのもの（リハーサルで直したもの）を使います"
+    if [ -n "$plug_update" ]; then
+        log "  プラグインの版を上げます（bin/plugin.sh sync）:"
+        printf '%s\n' "$plug_update" | sed 's/^/[import]     /'
+    fi
+    [ -z "$plug_missing_off" ] || log "  元の店で無効のプラグインのうち、ここに無いもの（運びません。無効なので画面には響きません）: $(printf '%s' "$plug_missing_off" | tr '\n' ' ')"
+    [ -z "$plug_extra" ] || log "  ここにあって元の店に無いプラグイン（切り替えのあとで入れる）: $(printf '%s' "$plug_extra" | tr '\n' ' ')"
     [ "$magic_old" = "$magic_now" ] || log "  .env の ECCUBE_AUTH_MAGIC を元の店の値にします"
     local ans
     read -r -p "始めるなら、プロジェクト名（${proj}）を打ってください: " ans || ans=""
@@ -787,11 +951,13 @@ cmd_cutover() {
         cmd_fetch "${host}:${path}" --name="$name" --full >/dev/null
         resolve_src "$dest" ""
         [ -n "$src_dump" ] || die "DB をダンプできませんでした"
+        # 先に取ってから止めるまでの間に、元の店でプラグインが足されていないか
+        plugins_check "$src_dump" "$img"
+        [ -z "$plug_missing_on" ] || plugins_missing_die ssh-after
     fi
 
     # ── 3. データだけ流し込み、上げる ──
     local pristine; pristine="$(get_pristine "$src_ver")"
-    local img; img="$(docker inspect -f '{{.Config.Image}}' "$cid")"
     local out="backups/$(date +%Y%m%d-%H%M%S)-cutover-${name}"
     mkdir -p "$out"; chmod 700 "$out"; out="$(cd "$out" && pwd)"
     local dmount
@@ -849,6 +1015,10 @@ cmd_cutover() {
     else
         log "  やめて元の店に戻すなら（このキットで注文を受ける前だけ）: ssh ${host} rm '${mfile}'"
     fi
+    if [ -n "$plug_extra" ]; then
+        log "  リハーサルで足したプラグイン（元の店の DB に無いので、まだ入っていない）を入れる:"
+        printf '%s\n' "$plug_extra" | sed 's#^#[import]     bin/plugin.sh install #'
+    fi
     log "  git status で、ページ（app/template/user_data）の変更をコミットしてください"
 }
 
@@ -858,5 +1028,6 @@ case "$1" in
     fetch) shift; cmd_fetch "$@" ;;
     unpack) shift; cmd_unpack "$@" ;;
     diagnose) shift; cmd_diagnose "$@" ;;
-    *) die "知らないコマンドです: $1（fetch / unpack / diagnose / load / cutover）" ;;
+    plugins) shift; cmd_plugins "$@" ;;
+    *) die "知らないコマンドです: $1（fetch / unpack / diagnose / load / plugins / cutover）" ;;
 esac
