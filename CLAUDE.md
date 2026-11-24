@@ -510,6 +510,7 @@ DoctrineMigrations / config / Plugin）と `html/user_data`（独自 CSS/JS）�
 | `docs/install.md` | 利用者向けの導入手順（取得 → 起動 → 更新の受け取り） |
 | `docs/customize.md` | 本体を汚さずに実装を足す場所、framework 級設定 |
 | `docs/upgrade.md` | バージョン切替とバージョンアップ、切り戻し |
+| `docs/import.md` | キットに載っていない店の取り込み（`bin/import.sh` の診断） |
 | `docs/deploy.md` | 本番デプロイ |
 | `docs/distribute.md` | 配布と更新（配布イメージ、`bin/self-update.sh`） |
 | `docs/backup.md` | バックアップ / 復元 |
@@ -528,6 +529,7 @@ bin/init.sh                    # 初回セットアップ
 bin/deploy.sh                  # 自分のコードを反映。退避→メンテ ON→pull→migration→プラグインDB→proxy→
                                # キャッシュ→疎通→OFF。失敗したら ON のまま止まる（壊れた画面を出さない）
 bin/self-update.sh             # この環境自体を新しいリリースへ（--check で確認だけ）
+bin/import.sh fetch|diagnose   # キットに載っていない店を読むだけで調べる（docs/import.md）
 bin/upgrade.sh ~4.3.2          # バージョンアップ（データ保持・運用環境向け）
 bin/upgrade.sh ~4.3.2 --prod   # 本番はこちら。付けないと開発構成のまま公開される
 bin/switch-version.sh ~4.2.0   # バージョン切替（データ破棄・開発用）
