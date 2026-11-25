@@ -248,7 +248,9 @@ DoctrineMigrations / config / Plugin）と `html/user_data`（独自 CSS/JS）�
 - **`bin/upgrade.sh` は失敗したら自動で元の版に戻す。** 止める前に `.env` を `var/upgrade/env.before` へ写し、
   動いているイメージの ID を控え、**メンテナンス表示の中で**バックアップ（`-before-upgrade`）を取り、本体ボリュームを
   `<プロジェクト>_eccube_app_before_upgrade` へ写す。新しい版のボリュームにも表示を置いて起動し、token の cookie で
-  中から開くかを見てから外す（確認前に注文が入って、戻したときに消えないように）。失敗・Ctrl-C は `rollback_upgrade` が
+  中から開くかを見てから外す（確認前に注文が入って、戻したときに消えないように）。開くかはトップと商品一覧の 200 に加えて、
+  **上げる前に開いていた**カート・会員登録・問い合わせ・ログイン・ご利用ガイド・管理画面のログインが 500 番台でないか（`check_pages`。
+  上げる前から落ちていたページは見ない。302 / 403 / 404 は落ちたことにしない）。失敗・Ctrl-C は `rollback_upgrade` が
   .env・タグ・本体を戻し、DB に書いていれば `restore.sh --rollback --db-only` で戻して、**`ECCUBE_SKIP_DB_INIT=1` で**
   起動し直す（entrypoint の migration は失敗を握るので、失敗した独自 migration をもう一度当てて戻した DB を書き換える）。
   差分の検査は削除に加えて**列の名前の変更**（`CHANGE a b` / `RENAME COLUMN`）も止める。
