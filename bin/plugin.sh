@@ -917,7 +917,10 @@ PHP
     fi
     echo "[doctor] 疎通を確かめる先: ${base}"
     page_ng=0
-    for path in / /products/list /entry /admin/login; do
+    # 管理画面の URL は .env の ECCUBE_ADMIN_ROUTE（compose がアプリに渡す）。**/admin と決め打ちしない。**
+    # init.sh は admin-<乱数> にするので、決め打ちでは init で作った店の全部で「404 ← 異常」を出していた（kit-e2e で発覚）
+    admin_route="$(env_get ECCUBE_ADMIN_ROUTE)"
+    for path in / /products/list /entry "/${admin_route:-admin}/login"; do
         code="$(curl -s -o /dev/null -w '%{http_code}' "${base}${path}" || echo 000)"
         case "$code" in
             200|302) echo "[doctor] ${code} ${path}" ;;
