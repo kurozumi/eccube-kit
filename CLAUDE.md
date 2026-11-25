@@ -172,7 +172,8 @@ DoctrineMigrations / config / Plugin）と `html/user_data`（独自 CSS/JS）�
   ここに書く。ro だとブロックと新規ページの保存が 500、メール本文は保存エラー（本体は
   `dumpFile` を捕まえていない）。開発では override が rw にしていたので気づかなかった。
   コードの側（`app/Customize` 等）は ro のまま。
-- **Linux の本番は `.env` に `PUID` / `PGID`。** entrypoint が www-data の uid を揃える。
+- **Linux の本番は `.env` に `PUID` / `PGID`。** `bin/init.sh` が Linux で自動で書く（root で打ったときは書かない。v1.0.25 までは
+  書かず、文書の案内だけだった）。書いていない Linux の店は `doctor` が「注意」を出す。entrypoint が www-data の uid を揃える。
   揃えないと、管理画面が書いたファイルを `git pull` が上書きできず、ホストが置いた
   ファイルを管理画面が書けない（欄が空に見える）。macOS は透過なので不要。
 - **ディスクに残る状態は、git か backup のどちらかに必ず入る。** 管理画面は DB

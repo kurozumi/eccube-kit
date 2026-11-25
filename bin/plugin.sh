@@ -897,6 +897,13 @@ PHP
         ;;
     esac
 
+    # Linux で PUID が無いと、管理画面が書いたファイルが www-data の持ち物になり、git pull と restore が上書きできない
+    # （restore は途中で落ちてメンテナンス表示のまま止まる）。v1.0.25 までの init.sh は書いていなかった
+    if [ "$(uname -s)" = Linux ] && [ -z "$(env_get PUID)" ] && [ "$(id -u)" != 0 ]; then
+        echo "[doctor] 注意: .env に PUID / PGID がありません（Linux）。git pull と bin/restore.sh が、管理画面が書いたファイルを上書きできません"
+        echo "         直すには .env に PUID=$(id -u) と PGID=$(id -g) を書いて docker compose up -d（docs/install.md「本番が Linux なら」）"
+        warn=1
+    fi
     echo "[doctor] キャッシュを組み立て直します"
     clear_runtime_cache
     # **ここでは止まらない。** 点検の途中なので、失敗も所見として拾って先へ進む
