@@ -8,6 +8,8 @@ nginx・PHP・DB・Redis などに重大な脆弱性が出たとき、**その�
 ```
 03:00 JST  build-image（毎日）   土台の PHP イメージが変わった組だけ焼き直す（月曜は全部）
 04:00 JST  security-scan（毎日） 全イメージを Trivy で調べ、保守期限と Docker の設定も見る → 要対応なら Issue
+04:30 JST  ec-cube-watch（毎日） EC-CUBE 公式の脆弱性リスト・セキュリティ勧告・開発者向けガイドが増えたら Issue
+           ec-cube-watch（毎月 1 日）サイト運営者向けのガイドラインを人が見るよう Issue で知らせる
 PR のたび  config-check            compose / docker/ を変える PR が決まりを破っていたら落とす
 05:00 JST  Dependabot（毎日）    版を固定して書いてあるイメージの版上げ PR
            人（必要なら Claude）  Issue と PR を読み、うちの構成で効くかを調べ、直す PR を作る
@@ -113,6 +115,27 @@ claude.ai の定期ルーティン（`/schedule`）は作ってあるが、止�
 
 **クラウドで動かすときにできないこと**: クラウドの環境で Docker が動くとは限らないので、画面が出るかまでは
 確かめられない。PR の「確かめていないこと」に書かせ、人がマージ前に手元で見る。
+
+## EC-CUBE 公式の情報（ec-cube-watch.yml）
+
+Trivy が見るのはイメージの中のパッケージで、**EC-CUBE 本体の脆弱性は見ない**（vendor は本体の lock）。本体の分は
+公式の発表を見張る。毎日、次の 3 つを読み、前回から増えたものがあればラベル `ec-cube-watch` の Issue を開く。
+
+| 見る先 | 何が分かるか |
+|---|---|
+| [脆弱性リスト](https://www.ec-cube.net/info/weakness/) | 本体の脆弱性と、対象の版・深刻度 |
+| [EC-CUBE/ec-cube のセキュリティ勧告](https://github.com/EC-CUBE/ec-cube/security/advisories) | 同じもの（GitHub 側。CVE が付く） |
+| 開発者向けのセキュリティガイドライン（EC-CUBE/doc4.ec-cube.net の `_pages/security-guideline/`） | カスタマイズとプラグインを作るときの決まり |
+
+- 前回の状態は、そのラベルのいちばん新しい Issue の本文に隠して持つ。**そのラベルの Issue を消すと、次の回が「初回」に
+  なる**（いまある全部を記録し直すだけで、知らせは出ない）
+- 読めなかった元は前回の状態を引き継ぎ（「消えた」と扱わない）、ラベル `ec-cube-watch-error` の Issue を 1 つだけ開く
+- 増えた Issue を閉じるのは人。中身を読み、配っている系列（4.2・4.3・4.4）に関係するか、修正版が出たら `bin/upgrade.sh` の
+  案内をリリースノートに書くか、`docs/security.md` を直すかを決めてから閉じる。手元の Claude Code に Issue を渡してよい
+
+**サイト運営者向けの「[セキュリティ対策ガイドライン](https://www.ec-cube.net/security/guideline/)」は機械では読めない**
+（ブラウザの確認がかかっている。すり抜けない）。毎月 1 日に、ラベル `ec-cube-guideline` の Issue で「開いて見る」よう知らせる。
+変わっていたら、ページのスクリーンショットか本文を手元の Claude Code に渡して `docs/security.md` に反映する。
 
 ## 利用者の側
 
