@@ -159,8 +159,49 @@ image_resolve_php() { # image_resolve_php <系列> <指定（空可）> <いま�
 image_php_of_container() { # image_php_of_container <コンテナ ID>
     local img
     img="$(docker inspect --format '{{.Image}}' "$1" 2>/dev/null)" || return 0
-    docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$img" 2>/dev/null |
+    image_php_of_image "$img"
+}
+
+# イメージ（ID か参照）の PHP（8.3 のような major.minor）。読めなければ空。
+image_php_of_image() { # image_php_of_image <イメージ>
+    docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$1" 2>/dev/null |
         sed -n 's/^PHP_VERSION=\([0-9]*\.[0-9]*\).*/\1/p' | head -1 || true
+}
+
+# ── 引いたイメージで PHP のマイナー版が変わるなら止める（勝手に上げない）──
+# 短いタグ（ec-cube:4.3）は系列の既定の PHP を指す。既定を動かすと（4.3 は 8.2 → 8.3）、翌朝の焼き直しを
+# deploy / publish が引いた時点で、**店の PHP のマイナー版が黙って変わる**。新しい PHP で動かないプラグインが
+# あれば、それで店が落ちる。PHP を変えるのは upgrade.sh --php= だけにする（動くかを確かめ、だめなら戻す）。
+#   image_php_drift_guard <引く前のイメージ ID（空可）> <接頭辞> [動いているコンテナ ID]
+#   0 … 変わらない・前が無い・読めない（止めない。判定できないことで作業を止めない）
+#   1 … 変わる。**手元のタグを引く前のイメージに戻してから**説明を出す（戻さないと、次の up -d で黙って切り替わる）
+# パッチ版（8.3.36 → 8.3.37）は見ない。それは届けたいもの。
+image_php_drift_guard() {
+    local before="$1" p="$2" cid="${3:-}" ref after old new pinned series ver
+    [ -n "$before" ] || return 0
+    ref="$(image_ref)"
+    after="$(docker image inspect --format '{{.Id}}' "$ref" 2>/dev/null || true)"
+    [ -n "$after" ] && [ "$after" != "$before" ] || return 0
+    old="$(image_php_of_image "$before")"
+    new="$(image_php_of_image "$after")"
+    [ -n "$old" ] && [ -n "$new" ] && [ "$old" != "$new" ] || return 0
+    docker tag "$before" "$ref" 2>/dev/null || echo "${p}注意: 手元のタグを元のイメージに戻せませんでした（${ref}）。" >&2
+    pinned="$(image_retag_php "$ref" "$old")"
+    series="$(printf '%s' "${ref##*:}" | sed -nE 's/^([0-9]+\.[0-9]+).*/\1/p')"
+    ver=""; [ -z "$cid" ] || ver="$(image_eccube_of_container "$cid")"
+    {
+        echo "${p}止めました: 新しいイメージは PHP ${new} です（いまは PHP ${old}）。PHP のマイナー版は勝手に上げません。"
+        echo "${p}  何も変えていません。お店は PHP ${old} のまま動いています（手元のタグも元に戻しました）。"
+        echo "${p}  ${ref} は系列の既定の PHP を指すタグで、既定が ${new} に変わりました。どちらかを選んでください:"
+        if [ -n "$series" ] && image_php_supported "$series" "$old"; then
+            echo "${p}  - PHP ${old} のままにする: .env の ECCUBE_IMAGE を ${pinned} にして、もう一度（パッチは届き続けます）"
+        else
+            echo "${p}  - PHP ${old} は ${series:-この} 系列ではもう焼いていません（パッチが届かない）。上げてください"
+        fi
+        echo "${p}  - PHP ${new} に上げる: bin/upgrade.sh ${ver:-<いまの EC-CUBE の版>} --php=${new}（本番は --prod も）"
+        echo "${p}    上げる前にプラグインが読めるかを確かめ、上げたあと開かなければ自動で戻します。先に検証の環境で試すのが安全です"
+    } >&2
+    return 1
 }
 
 # 動いているコンテナの EC-CUBE のバージョン（4.3.1 など）。読めなければ空。
