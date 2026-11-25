@@ -4,6 +4,14 @@
 #           bin/upgrade.sh 4.4.x-dev --php=8.5  PHP も一緒に変える（系列が対応している版だけ。
 #                                                 指定しなければ、いまの PHP が使える限りそのまま）
 #
+# **系列をまたぐ（4.3 → 4.4）ときは、ここで止まりやすくしてある。** プラグインの作り直しを伴い、店ごとに壊れ方が違うため:
+#   - 本番（--prod）は、検証の環境で同じ版の予行演習を済ませたことを --rehearsed で言わないと始めない
+#   - 店に触る前に、上げた先のイメージで点検する（bin/lib/compat.sh）。独自コードとプラグインに、上げた先でだけ出る
+#     誤り（PHPStan）が 1 件でもあれば止める。**点検できなかったときも止める。** 本体が変わったのに古いまま勝ち続ける
+#     上書きテンプレートは挙げる。結果は var/upgrade/precheck-<日時>/
+#   - 続けるには y ではなくプロジェクト名を打つ（非対話は CONFIRM_UPGRADE=<プロジェクト名>）
+#   点検の結果を承知のうえで進める（検証の環境で確かめた）ときだけ UPGRADE_ACCEPT_RISK=<プロジェクト名>
+#
 # bin/switch-version.sh との違い:
 #   switch-version.sh … down -v で DB・画像ごと破棄して作り直す（開発で別バージョンを試す用）
 #   upgrade.sh        … DB(db_data) と画像(eccube_upload) は残し、本体コードだけ差し替えて
@@ -37,15 +45,19 @@ cd "$(dirname "$0")/.."
 . "$(dirname "$0")/lib/maint.sh"
 # shellcheck source=lib/theme.sh
 . "$(dirname "$0")/lib/theme.sh"
+# shellcheck source=lib/compat.sh
+. "$(dirname "$0")/lib/compat.sh"
 
 # --prod は本番構成（compose.prod.yaml）で上げる指定。位置は問わない。
 # --php=8.x は PHP も一緒に変える指定。
 want_prod=0
 want_php=""
+rehearsed=0
 args=()
 for a in "$@"; do
     case "$a" in
         --prod)  want_prod=1 ;;
+        --rehearsed) rehearsed=1 ;;
         --php=*) want_php="${a#--php=}" ;;
         --php)   echo "エラー: --php=8.3 の形で指定してください。" >&2; exit 1 ;;
         *)       args+=("$a") ;;
@@ -235,6 +247,71 @@ else
     multihost=0
 fi
 
+# ── 系列をまたぐか ──
+# いまの系列は、動いている版 → タグ → .env の制約の順に読む
+from_series="$(printf '%s' "$running_ver" | sed -nE 's/^([0-9]+\.[0-9]+).*/\1/p')"
+[ -n "$from_series" ] || from_series="$(printf '%s' "${current_image##*:}" | sed -nE 's/^([0-9]+\.[0-9]+).*/\1/p')"
+[ -n "$from_series" ] || { [ -z "$current" ] || from_series="$(image_series "$current" 2>/dev/null || true)"; }
+cross=0
+if [ -n "$from_series" ] && [ "$from_series" != "$series" ]; then
+    cross=1
+    cat <<EOS
+
+[upgrade] ** EC-CUBE の系列をまたぎます（${from_series} → ${series}）。**
+          系列をまたぐと、本体の作りが変わります。プラグイン・独自のコード・上書きしたテンプレートが、
+          エラーを出さずに一部の画面だけ壊れることがあります（決済・会員登録・注文の確定など）。
+          必ず検証の環境で同じ版に上げて、注文まで通してから本番を上げてください（docs/upgrade.md）。
+EOS
+    if [ "$want_prod" = 1 ] && [ "$rehearsed" = 0 ]; then
+        echo "[upgrade] 中止しました（何も変えていません）: 本番で系列をまたぐには、検証の環境で予行演習を済ませてから" >&2
+        echo "          --rehearsed を付けて打ち直してください。例: bin/upgrade.sh ${ver} --prod --rehearsed" >&2
+        exit 1
+    fi
+    # 店に触る前の点検。上げた先のイメージを引いて（.env はまだ変えない）、いまのイメージと比べる
+    pre="var/upgrade/precheck-$(date +%Y%m%d-%H%M%S)"
+    pre_ok=0
+    if [ -n "$current_image" ] && image_uses_registry && [ -n "$old_image_id" ]; then
+        target_ref="$(image_retag_php "$(image_retag_series "$current_image" "$series")" "$php_ver")"
+        echo "[upgrade] 上げた先のイメージで点検します（店には触りません。数分かかることがあります）: ${target_ref}"
+        if docker pull -q "$target_ref" >/dev/null 2>&1 && compat_check "$old_image_id" "$target_ref" "$pre"; then
+            pre_ok=1
+        fi
+    else
+        mkdir -p "$pre"; echo "手元で build する環境なので、上げた先のイメージが無く点検できません" > "$pre/error.txt"
+    fi
+    accept="${UPGRADE_ACCEPT_RISK:-}"
+    if [ "$pre_ok" = 1 ]; then
+        nerr="$(grep -c . "$pre/phpstan-new.txt" 2>/dev/null || true)"; nerr="${nerr:-0}"
+        ntpl="$(grep -c . "$pre/templates-changed.txt" 2>/dev/null || true)"; ntpl="${ntpl:-0}"
+        if [ "$ntpl" -gt 0 ]; then
+            echo "[upgrade] 上書きしているテンプレートのうち、本体側が変わったもの ${ntpl} 件（古いまま勝ち続けます。上げたら本体の変更を写す）:"
+            head -10 "$pre/templates-changed.txt" | awk -F'\t' '{ print "           " $1 " … " $2 }'
+        fi
+        if [ "$nerr" -gt 0 ]; then
+            echo "[upgrade] 上げた先でだけ出る誤り ${nerr} 件（独自コードとプラグイン）:" >&2
+            sed -nE 's#^app/Plugin/([^/]+)/.*#プラグイン \1#p; s#^app/Customize/.*#app/Customize#p' "$pre/phpstan-new.txt" | sort | uniq -c | sort -rn | sed 's/^ */           /' >&2
+            head -5 "$pre/phpstan-new.txt" | sed 's/^/             /' >&2
+            if [ "$accept" != "$proj" ]; then
+                echo "[upgrade] 中止しました（何も変えていません）。上げると壊れる見込みです。全部: ${pre}/phpstan-new.txt" >&2
+                echo "          プラグインを ${series} 対応版に入れ替えるか直してから、もう一度。オーナーズストアで買ったものは、作者に対応版を確かめる" >&2
+                echo "          （検証の環境で動くことを確かめたうえで進めるなら UPGRADE_ACCEPT_RISK=${proj}）" >&2
+                exit 1
+            fi
+            echo "[upgrade] UPGRADE_ACCEPT_RISK が指定されているので進めます。" >&2
+        else
+            echo "[upgrade] 点検: 上げた先でだけ出る誤りは見つかりませんでした（${pre}）。動かして確かめるまで安心はしないでください。"
+        fi
+    else
+        echo "[upgrade] 点検できませんでした: $(cat "$pre/error.txt" 2>/dev/null || echo 不明)" >&2
+        if [ "$accept" != "$proj" ]; then
+            echo "[upgrade] 中止しました（何も変えていません）。確かめられないまま系列はまたぎません。" >&2
+            echo "          （検証の環境で動くことを確かめたうえで進めるなら UPGRADE_ACCEPT_RISK=${proj}）" >&2
+            exit 1
+        fi
+        echo "[upgrade] UPGRADE_ACCEPT_RISK が指定されているので進めます。" >&2
+    fi
+fi
+
 cat <<EOS
 [upgrade] EC-CUBE をバージョンアップします。
           現在: ${current_show}（PHP ${running_php:-${base_php:-?}}）
@@ -260,8 +337,17 @@ if [ "$multihost" = 1 ]; then
         echo "  そちらで注文が入り、失敗して DB を戻したときに消えます。docs/scale.md「EC-CUBE を上げる」）。"
     fi
 fi
-read -r -p "続行しますか? [y/N] " ans
-[ "$ans" = "y" ] || { echo "中止しました"; exit 1; }
+if [ "$cross" = 1 ]; then
+    # 系列をまたぐときは y では通さない（指が覚えて通してしまうため。deploy.sh と同じ）
+    if [ "${CONFIRM_UPGRADE:-}" != "$proj" ]; then
+        [ -t 0 ] || { echo "中止しました（非対話なら CONFIRM_UPGRADE=${proj}）"; exit 1; }
+        read -r -p "系列をまたいで上げます。続けるならプロジェクト名（${proj}）を入力: " ans
+        [ "$ans" = "$proj" ] || { echo "中止しました"; exit 1; }
+    fi
+else
+    read -r -p "続行しますか? [y/N] " ans
+    [ "$ans" = "y" ] || { echo "中止しました"; exit 1; }
+fi
 
 # 1) .env をそのまま写しておく。以降、元に戻すときはこれを書き戻す（値を 1 つずつ戻すと、足した行や
 #    書き換えた行の戻し忘れが起きる）。

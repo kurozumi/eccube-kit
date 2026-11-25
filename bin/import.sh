@@ -475,7 +475,10 @@ cmd_diagnose() {
     local paths="app/Customize"
     [ -n "$(ls -A "$base/app/Plugin" 2>/dev/null)" ] && paths="$paths app/Plugin"
     run_stan() { # run_stan <イメージ> <出力>
+        # 4.4 の本体は PHPStan 2 向けの拡張を持ち、1.x の phar は「incompatible extensions」で何も読まずに終わる
+        # （誤り 0 件に見える）。拡張の置き場を空で覆う（bin/lib/compat.sh と同じ）
         docker run --rm --user "$(id -u):$(id -g)" \
+            --tmpfs /var/www/html/vendor/phpstan/extension-installer \
             -v "$base/app/Customize:/var/www/html/app/Customize:ro" \
             -v "$base/app/Plugin:/var/www/html/app/Plugin:ro" \
             -v "$tools:/tools:ro" -e HOME=/tmp \
