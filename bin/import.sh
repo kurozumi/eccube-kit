@@ -38,7 +38,7 @@
 #   - 本体を直接書き換えた箇所（同じ版のまっさらな EC-CUBE と比べる。差分は core.patch）
 #   - app/template の写しのうち、上げた先の本体が変えたもの（3 つを比べる）
 #   - プラグインと app/Customize が上げた先で読めるか（PHPStan を両方の版で流し、上げた先でだけ出る誤りを数える）
-#   - 使っているテーマ、足されたライブラリ（composer.extra.json の下書き）、店が足した migration
+#   - 使っているテーマ、足されたライブラリ（composer.extra.json の下書き）、店が足した migration（load が名前空間と DB の記録を合わせて運ぶ）
 #   - DB の種類と版、MySQL 8 専用の照合順序、トリガー、ダンプが最後まであるか
 #   - 判定（固定料金で受けられるか）と、店に確かめることの一覧
 #
@@ -962,12 +962,14 @@ cmd_cutover() {
     mkdir -p "$out"; chmod 700 "$out"; out="$(cd "$out" && pwd)"
     local dmount
     case "$src_dump" in *.gz) dmount="${src_dump}:/dump/dump.sql.gz:ro" ;; *) dmount="${src_dump}:/dump/dump.sql:ro" ;; esac
-    local differ
-    differ="$(docker run --rm --user "$(id -u):$(id -g)" \
+    local packed differ mig_missing
+    packed="$(docker run --rm --user "$(id -u):$(id -g)" \
         -v "$src_base:/old:ro" -v "$pristine:/from:ro" -v "$PWD:/kit:ro" -v "$out:/out" -v "$dmount" \
         -v "$PWD/bin/lib/import-pack.php:/kit-pack.php:ro" \
-        --entrypoint php "$img" -d memory_limit=1G /kit-pack.php pack-data "$theme" | sed -n 's/^DIFFER=//p')" \
+        --entrypoint php "$img" -d memory_limit=1G /kit-pack.php pack-data "$theme")" \
         || die "元の店のデータを詰め直せませんでした"
+    differ="$(printf '%s\n' "$packed" | sed -n 's/^DIFFER=//p')"
+    mig_missing="$(printf '%s\n' "$packed" | sed -n 's/^MIGRATION_MISSING=//p')"
 
     log "このキットのいまの状態を控えます（backups/<日時>-before-cutover）..."
     local blog; blog="$(BACKUP_LABEL=cutover bin/backup.sh 2>&1)" || { printf '%s\n' "$blog" >&2; die "このキットを控えられませんでした。このキットは何も変えていません"; }
@@ -1002,6 +1004,11 @@ cmd_cutover() {
     if [ -n "$differ" ]; then
         log "元の店の管理画面で直されていて、このリポジトリのものと違うファイルがあります（運んでいません。必要なら手で移す）:"
         printf '%s\n' "$differ" | sed 's/^/    /'
+    fi
+    if [ -n "$mig_missing" ]; then
+        log "元の店にあって、このリポジトリに無い migration があります（リハーサルのあとで元の店に足されたもの）。"
+        log "DB には当たっていますが、ファイルがありません。元の店の同じファイルの名前空間を CustomizeMigrations にして、app/DoctrineMigrations に置いてください:"
+        printf '%s\n' "$mig_missing" | sed 's/^/    /'
     fi
     log "次にやること:"
     log "  1) このキットの画面を、本番の URL を向ける前に確かめる（管理画面に元の店のパスワードで入れる・商品・カート）"
