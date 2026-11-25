@@ -6,7 +6,7 @@
 #   ほかのコマンドが「変える前の控え」を取るときは BACKUP_LABEL=<名前> を付ける
 #   （<日時>-before-<名前>/ に置く。毎日の世代とは別に、名前ごとに BACKUP_KEEP_SAFETY 世代（既定 10）残す）。
 #   cron 例（毎日 4:00、リポジトリ直下で）:
-#     0 4 * * * cd /path/to/eccube-docker && bin/backup.sh >> var/backup.log 2>&1
+#     0 4 * * * cd /path/to/myshop && bin/backup.sh >> var/backup.log 2>&1
 #
 # - DB は mysqldump --single-transaction（InnoDB 前提・サービス無停止で整合ダンプ）
 # - 画像は html/upload を tar.gz（eccube_upload ボリュームの実体）

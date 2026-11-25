@@ -80,7 +80,7 @@ require '/var/www/html/vendor/autoload.php';
 try {
     $t = Symfony\Component\Mailer\Transport::fromDsn(getenv('MAILER_DSN_TEST'));
     $m = (new Symfony\Component\Mime\Email())->from(getenv('MAIL_FROM'))->to(getenv('MAIL_TO'))
-        ->subject('[eccube-docker] 送信テスト')->text("このメールが届けば、お店からのメールは送れます。\n" . date('c'));
+        ->subject('[eccube-kit] 送信テスト')->text("このメールが届けば、お店からのメールは送れます。\n" . date('c'));
     $t->send($m); echo "SENT\n";
 } catch (Throwable $e) { echo "FAILED: " . $e->getMessage() . "\n"; exit(1); }
 PHP

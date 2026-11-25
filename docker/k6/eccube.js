@@ -132,7 +132,7 @@ export const options = {
   summaryTrendStats: ['avg', 'min', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
   // 遅れて VU が足りなくなったら、それも結果（dropped_iterations）に出す
   discardResponseBodies: false,
-  userAgent: 'eccube-docker-loadtest (k6)',
+  userAgent: 'eccube-kit-loadtest (k6)',
 };
 
 // ── 事前に商品とカテゴリを集める ──

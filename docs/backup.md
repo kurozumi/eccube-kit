@@ -146,7 +146,7 @@ BACKUP_SYNC=/mnt/nas/eccube                # rsync（マウント済みの NAS�
 - DB は `mysqldump --single-transaction`（InnoDB 前提・**無停止で整合ダンプ**）
 - cron 例（毎日 4:00）:
   ```
-  0 4 * * * cd /path/to/eccube-docker && bin/backup.sh >> var/backup.log 2>&1
+  0 4 * * * cd /path/to/myshop && bin/backup.sh >> var/backup.log 2>&1
   ```
 - サーバー外へは `BACKUP_SYNC` で送る（上）。同じディスクに置くだけでは障害時に共倒れになる。
 

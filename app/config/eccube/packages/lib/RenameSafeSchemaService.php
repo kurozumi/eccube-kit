@@ -1,7 +1,7 @@
 <?php
 
 /*
- * eccube-docker が足すもの（EC-CUBE 本体ではない）。
+ * eccube-kit が足すもの（EC-CUBE 本体ではない）。
  * 読み込むのは app/config/eccube/packages/schema_rename_guard.php。
  */
 

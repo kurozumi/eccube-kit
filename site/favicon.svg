@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="eccube-docker">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="EC-CUBE 運用キット">
   <!-- 箱 = 出荷の箱（EC）とコンテナ（Docker）を兼ねる形。16px でも読めるよう、
        線ではなく面の明度差だけで立体にしている。色は紹介ページの accent と同じ -->
   <rect width="64" height="64" rx="14" fill="#E8621C"/>
