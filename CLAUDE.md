@@ -211,6 +211,10 @@ DoctrineMigrations / config / Plugin）と `html/user_data`（独自 CSS/JS）�
   （Symfony Dotenv が「設定済み」と見て本体の既定値を潰す）ので、任意のものは
   列挙せず `.env.app` に逃がす。`DB_PASSWORD` / `DB_ROOT_PASSWORD` / `ECCUBE_AUTH_MAGIC`
   は `:?` で必須（既定値 `eccube_pass` で黙って立ち上がらない。#110）。
+  **管理画面の IP 制限（`ECCUBE_ADMIN_ALLOW_HOSTS`）も `.env.app`。** 管理画面の「セキュリティ管理」はコンテナ内の `.env` に
+  書き、upgrade で消える。両方にあると **4.2 / 4.3 は画面（コンテナ内 .env。`Dotenv::createUnsafeMutable` が上書きする）、
+  4.4 は環境変数**が勝つ（`boot_env(…, false)`）。画面は IPv6 の単独アドレスを「IPv4 ではない」と弾き、`/128` なら通す
+  （`Assert\Ip` の既定が v4。3 系列で確かめた。2026-11-25）。ホストの `.env` から渡るのはテーマと管理画面の URL だけ。
 - **`bin/reset.sh` と `bin/switch-version.sh` は `down -v` する。** DB・画像・
   セッションが消える。**消す前に `backups/<日時>-before-<名前>/` へ退避し、取れなければ何も消さずに止まる**
   （`guard_backup_before_destroy`。止まっているスタックは DB に繋がらず取れないので止まる。取らずに消すのは
@@ -520,6 +524,7 @@ DoctrineMigrations / config / Plugin）と `html/user_data`（独自 CSS/JS）�
 | `docs/scale.md` | 大規模アクセス、セッション・画像の共有、LB、メールの非同期化 |
 | `docs/loadtest.md` | 負荷試験（`bin/loadtest.sh` と `docker/k6/eccube.js`）。目標の決め方・読み方・詰まった場所ごとの打ち手 |
 | `docs/monitoring.md` | 監視 |
+| `docs/security.md` | EC-CUBE 公式のセキュリティ対策ガイドラインとの対応（WAF・国の制限・管理画面の IP 制限と 2 段階認証・兆候が見えたら） |
 | `docs/testing.md` | ユニットテスト |
 | `docs/security-updates.md` | ミドルウェアの脆弱性と Docker の設定の毎日の点検（Trivy・設定の決まり・Dependabot） |
 | `docs/ide.md` | PhpStorm の設定 |

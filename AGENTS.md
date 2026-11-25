@@ -61,5 +61,6 @@ DB を外に出すなら `bin/setup.sh db`（どれも質問に答える → 先
 ## 分からないとき
 
 `docs/` に全部あります（`customize.md` 直す場所、`upgrade.md` 上げ方、`backup.md` 控え、
-`data-safety.md` 消える操作、`deploy.md` 公開、`scale.md` 大きくするとき）。
+`data-safety.md` 消える操作、`deploy.md` 公開、`scale.md` 大きくするとき、`security.md` セキュリティ対策と
+不審な兆候が見えたときの手順）。
 `CLAUDE.md` は **この環境自体を保守する人向け**の細かい記録で、お店の運用には要りません。
