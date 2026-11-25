@@ -170,16 +170,10 @@ root が要るのはパッケージの導入など限られた場面だけで、
 
 ## ライセンス
 
-**Business Source License 1.1**（[LICENSE](LICENSE)。v1.0.24 から）。
+**Apache License 2.0**（[LICENSE](LICENSE)）。商用・受託・再配布を含めて自由に使えます。
 
-- **自分の店（自社・グループ会社の店）を動かすのは、本番でも無料**です。開発・検証・学習も無料です。
-- **ほかの人の店のための仕事に使うには商用ライセンスが要ります。** 受託での構築・引っ越し・
-  バージョンアップ・保守・ホスティングや、これを含む製品・サービスを有料で配る場合です。
-  [サービスと料金](https://eccube-kit.a-zumi.net/services#license) を見るか、info@a-zumi.net へ。
-- 各版は、公開から 4 年たつと Apache License 2.0 になります。
-- **v1.0.23 までは Apache License 2.0** のままです（その版を使い続ける限り、今までどおり自由）。
-- `app/` の下のファイル（EC-CUBE の中で動く PHP と設定）は EC-CUBE に合わせて
-  **GPL-2.0-or-later**（[LICENSE-GPL](LICENSE-GPL)）。
+- `app/` の下のファイル（EC-CUBE の中で動く PHP と設定）だけは、EC-CUBE（GPL-2.0）のクラスを継承・包むので、
+  EC-CUBE に合わせて **GPL-2.0-or-later**（[LICENSE-GPL](LICENSE-GPL)）です。
 
 ### EC-CUBE 本体は対象外
 
