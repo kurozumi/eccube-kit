@@ -413,7 +413,8 @@ kept="$(docker run --rm -v "${app_vol}:/app:ro" alpine:3 sh -c '
 if [ -n "$kept" ]; then
     echo "[upgrade] 注意: 管理画面がコンテナ内 .env に書いていた値があります。ボリュームと一緒に消えます:"
     printf '%s\n' "$kept" | sed 's/^/           /'
-    echo "           残すなら .env（ホスト）に同じキーを書いてください（環境変数で渡ります）。"
+    echo "           残すなら、ECCUBE_TEMPLATE_CODE は .env（ホスト）、それ以外は .env.app に同じキーを書いてください"
+    echo "           （ホストの .env はアプリに丸ごとは渡りません。IP 制限は docs/security.md「管理画面を守る」）。"
 fi
 
 # コンテナの中で composer require したライブラリは volume の中にしか無いので、ここで消える。

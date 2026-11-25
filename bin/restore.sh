@@ -371,7 +371,8 @@ if has container.env; then
     if [ -n "$diffs" ]; then
         echo "[restore] 注意: 管理画面がコンテナ内 .env に書いていた値が、いまの環境と違います:"
         printf '%b' "$diffs"
-        echo "           必要なら .env（ホスト）に書いて docker compose up -d してください。"
+        echo "           必要なら、ECCUBE_TEMPLATE_CODE は .env（ホスト）、それ以外は .env.app に書いて docker compose up -d してください"
+        echo "           （ホストの .env はアプリに丸ごとは渡りません）。"
         echo "           テーマ（ECCUBE_TEMPLATE_CODE）は .env に書くのが正です（管理画面の選択は upgrade で消えます）。"
     fi
 fi
