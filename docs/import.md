@@ -261,7 +261,20 @@ bin/import.sh cutover --from=var/import/myshop --old-url=https://shop.example.jp
      元のサーバーへ行く（503 なので注文は入らない）
    - **背後配置**（ALB・ホストの nginx）: 前に置いたものの手順に従う
 
-4. **新しいサーバーを、店の名前で開く前に試す**（`tunnel` のとき）。本番のキットのトンネルの Public Hostname に
+4. **SPF を、前もって新しい送信元も通す形にする。** 新しいサーバーのメール（`MAILER_DSN` の送信サービス）を足さないと、
+   向け替えた直後から注文メールが迷惑メールに入る。
+   - **`v=spf1` で始まる TXT は 1 つの名前に 1 つだけ。** 送信サービスの手順が「この TXT を足す」と言っていても、
+     いまの SPF があれば、その中に書き足す（2 つ並べると、どちらも効かなくなる）
+   - 書き足すのは **`~all` / `-all` より前**（後ろに書いたものは見られない）。
+     例: `v=spf1 include:old.example ~all` → `v=spf1 include:old.example include:<送信サービスの名前> ~all`
+   - いまの送信元（元のサーバー）は消さない。元のサーバーのメールボックスから人が送るメールも、それで通っている
+   - **`a` で元のサーバーを通している SPF**（`v=spf1 a mx ~all` の `a`）は、店の名前を向け替えると `a` が新しいサーバー
+     （tunnel なら Cloudflare）を指し、元のサーバーが通らなくなる。`a` を `ip4:<元のサーバーの IP>` に書き換えておく
+     （`mx` は、2 で MX をメール用の名前へ移していれば、そのままでよい）
+   - 変えてから、いまの SPF の TTL の時間がたつのを待つ。元のサーバーの SMTP で注文メールを送り続けるなら、
+     SPF はいまのままでよい（外から SMTP で送れないレンタルサーバーもある。`bin/setup.sh mail` で 1 通送って確かめる）
+
+5. **新しいサーバーを、店の名前で開く前に試す**（`tunnel` のとき）。本番のキットのトンネルの Public Hostname に
    仮の名前（`new.example.jp → http://nginx:80`）を足し、外から開くか・管理画面に入れるかを見る。終わったら消す。
    `caddy` は店の名前が向くまで証明書を取れないので、前もっては試せない。
 
@@ -269,12 +282,16 @@ bin/import.sh cutover --from=var/import/myshop --old-url=https://shop.example.jp
 
 1. `bin/import.sh cutover` が通る（元の店は 503 のまま）
 2. 店の名前を向け替える
-   - `tunnel`: Cloudflare の DNS で店の名前の A・AAAA（か CNAME）を消し、トンネルの Public Hostname に店の名前を
-     足す（同じ名前の記録が 1 つでも残っていると足せない）。`www` でも開いていた店は `www` も同じようにする
+   - `tunnel`: Cloudflare の DNS で店の名前の **A・AAAA・CNAME だけ**を消し、トンネルの Public Hostname に店の名前を
+     足す（この 3 種類が 1 つでも残っていると足せない）。**同じ名前の MX・TXT は消さない**（`example.jp` で店を開いて
+     いると、メールと SPF の記録も同じ名前にある）。`www` でも開いていた店は `www` も同じようにする
    - `caddy`: A を新しいサーバーの IP へ。AAAA は、新しいサーバーに IPv6 があればその番地へ、無ければ消す（残すと
-     IPv6 で来るお客さんだけ元の 503 の店へ行く）。`www` でも開いていた店は `www` も向け、`.env` を
-     `SITE_DOMAIN="example.jp, www.example.jp"` にする（カンマのあとの空白が要る。空白が入るので `"` で囲む）。
-     証明書は向いてから取るので、最初の数分は HTTPS が開かないことがある（`docker compose logs caddy`）
+     IPv6 で来るお客さんだけ元の 503 の店へ行く）。`www` でも開いていた店は `www` も向ける。
+     **向け替えてから**、`.env` の `SITE_DOMAIN` に店の名前を書き（`www` もなら `SITE_DOMAIN="example.jp, www.example.jp"`。
+     カンマのあとの空白が要るので `"` で囲む）、`bin/publish.sh` で caddy を作り直す（`.env` を変えただけでは、
+     動いている caddy に届かない）。向く前に書いておくと、証明書を取りに行っては失敗し、取り直しの間が空いていく。
+     もう書いてあった店は `docker restart <プロジェクト>-caddy-1` で取り直させる。最初の数分は HTTPS が開かない
+     ことがある（`docker logs <プロジェクト>-caddy-1`）
 3. 外から確かめる。**元の店は 503、新しい店は 200** なので、状態の番号で見分けられる。
 
    ```bash
@@ -289,10 +306,6 @@ bin/import.sh cutover --from=var/import/myshop --old-url=https://shop.example.jp
 
 - **元の店は 1 週間ほど 503 のまま置く**（古い記録を覚えている端末・中継のため）。**開け直さない**（注文が元の店に入る）
 - 元のサーバーの cron を止める（切り替えの最後に表示が出る）
-- **SPF**: 新しいサーバーのメール（`MAILER_DSN` の送信サービス）を、SPF に足す。足さないと注文メールが迷惑メールに
-  入る。**`v=spf1` で始まる TXT は 1 つの名前に 1 つだけ。** 送信サービスの手順が「この TXT を足す」と言っていても、
-  いまの SPF があれば、その中に `include:…` を書き足す（2 つ並べると、どちらも効かなくなる）。元のサーバーの SMTP で送り続けるなら変えない（ただし、外から SMTP で送れない
-  レンタルサーバーもある。`bin/setup.sh mail` で 1 通送って確かめる）
 - 元のサーバーの解約は、メールを移したあと。それまで MX は元のサーバーのまま
 
 ## 分かっていること
