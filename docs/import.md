@@ -221,17 +221,24 @@ bin/import.sh cutover --from=var/import/myshop --old-url=https://shop.example.jp
 1. **DNS をどこが持っているかを見る。**
 
    ```bash
-   dig +short NS example.jp                 # 店の名前が shop.example.jp なら、親の example.jp を見る
+   dig +short NS shop.example.jp            # 店の名前そのものが別の DNS に預けてあれば、ここに出る
+   dig +short NS example.jp                 # 上が空なら、親（example.jp）を持っているところが店の名前も持っている
    dig +noall +answer shop.example.jp       # 2 列目が TTL（秒）。いま何秒覚えられているか
+   dig +short MX example.jp                 # メールの行き先（下の 2）
    ```
 
    レンタルサーバーのネームサーバー（`ns1.<会社>.jp` など）のことが多い。そのときは、その会社の管理画面の
    「DNS レコード設定」で変える。
 
-2. **いまの記録を全部控える**（管理画面の一覧を画面ごと保存する。`dig` では全部は取れない）。とくに次の 3 つ。
+2. **いまの記録を全部控える**（管理画面の一覧を画面ごと保存する。`dig` では全部は取れない）。とくに次のもの。
    - **MX と、MX が指す名前の A**（`mail.example.jp` など）。**ドメインのメール（`info@example.jp`）は、多くの場合
-     元のレンタルサーバーにある。** 店だけを移すので、MX は元のサーバーを指したままにする。
+     元のレンタルサーバーにある。** 店だけを移すので、メールは元のサーバーに届き続けるようにする。
      **メールを移すまで、元のサーバーは解約しない。**
+     - **MX が店の名前そのもの（`example.jp` で店を開いていて、MX も `example.jp`）を指していたら、そのままでは
+       向け替えと一緒にメールも新しいサーバーへ行く**（新しいサーバーはメールを受けないので、届かなくなる）。
+       前もって、メール用の名前（`mail.example.jp` など。無ければ作る）を元のサーバーの IP へ向け、MX をそちらへ
+       変えておく。MX の TTL の時間がたってから向け替える
+   - 店の名前の **A と AAAA**（IPv6）。AAAA があれば、向け替えのときに A と一緒に扱う
    - **TXT**（SPF の `v=spf1 …`、DKIM、DMARC、Google などのサイト確認）
    - 店の名前のほかに使っている名前（`www`、ほかのサービスの名前）
 
@@ -242,6 +249,10 @@ bin/import.sh cutover --from=var/import/myshop --old-url=https://shop.example.jp
        （灰色の TTL は「自動」で 5 分。向け替えたときに古い記録が残るのは数分で済む）。
        オンにすると、元の店に Cloudflare の HTTPS の設定が効いてしまう（「フレキシブル」だと、https へ送り返す店で
        行ったり来たりになって開かない）。メール用の名前は、向け替えたあとも灰色のまま（メールは Cloudflare を通らない）
+     - **DNSSEC を見る**: `dig +short DS example.jp` が何か返せば、いまの DNS で DNSSEC が有効。そのまま
+       ネームサーバーを変えると、確かめる側の DNS が名前を引けなくなり（`SERVFAIL`）、店もメールも止まる。先に
+       ドメインを買ったところで DS の登録を消し、DS の TTL（1 日のことが多い）がたってからネームサーバーを変える。
+       Cloudflare での DNSSEC は、移し終えてから有効にする
      - 記録をそろえてから、ドメインを買ったところでネームサーバーを Cloudflare のものに変える。行き渡るまで
        最大 2 日ほどかかる。`dig +short NS example.jp` が Cloudflare を返すようになってから、切り替えの日を決める
      - Cloudflare 側の設定は、紹介サイトの「本番サーバーを用意する」の「Cloudflare の設定」
@@ -258,10 +269,12 @@ bin/import.sh cutover --from=var/import/myshop --old-url=https://shop.example.jp
 
 1. `bin/import.sh cutover` が通る（元の店は 503 のまま）
 2. 店の名前を向け替える
-   - `tunnel`: Cloudflare の DNS で店の名前の A（か CNAME）を消し、トンネルの Public Hostname に店の名前を足す
-     （同じ名前の記録が残っていると足せない）。`www` でも開いていた店は `www` も足す
-   - `caddy`: A レコードを新しいサーバーの IP へ。証明書は向いてから取るので、最初の数分は HTTPS が開かないことがある
-     （`docker compose logs caddy`）
+   - `tunnel`: Cloudflare の DNS で店の名前の A・AAAA（か CNAME）を消し、トンネルの Public Hostname に店の名前を
+     足す（同じ名前の記録が 1 つでも残っていると足せない）。`www` でも開いていた店は `www` も同じようにする
+   - `caddy`: A を新しいサーバーの IP へ。AAAA は、新しいサーバーに IPv6 があればその番地へ、無ければ消す（残すと
+     IPv6 で来るお客さんだけ元の 503 の店へ行く）。`www` でも開いていた店は `www` も向け、`.env` を
+     `SITE_DOMAIN="example.jp, www.example.jp"` にする（カンマのあとの空白が要る。空白が入るので `"` で囲む）。
+     証明書は向いてから取るので、最初の数分は HTTPS が開かないことがある（`docker compose logs caddy`）
 3. 外から確かめる。**元の店は 503、新しい店は 200** なので、状態の番号で見分けられる。
 
    ```bash
@@ -276,8 +289,9 @@ bin/import.sh cutover --from=var/import/myshop --old-url=https://shop.example.jp
 
 - **元の店は 1 週間ほど 503 のまま置く**（古い記録を覚えている端末・中継のため）。**開け直さない**（注文が元の店に入る）
 - 元のサーバーの cron を止める（切り替えの最後に表示が出る）
-- **SPF**: 新しいサーバーのメール（`MAILER_DSN` の送信サービス）のための記録を、手順どおり TXT に足す。足さないと注文
-  メールが迷惑メールに入る。元のサーバーの SMTP で送り続けるなら変えない（ただし、外から SMTP で送れない
+- **SPF**: 新しいサーバーのメール（`MAILER_DSN` の送信サービス）を、SPF に足す。足さないと注文メールが迷惑メールに
+  入る。**`v=spf1` で始まる TXT は 1 つの名前に 1 つだけ。** 送信サービスの手順が「この TXT を足す」と言っていても、
+  いまの SPF があれば、その中に `include:…` を書き足す（2 つ並べると、どちらも効かなくなる）。元のサーバーの SMTP で送り続けるなら変えない（ただし、外から SMTP で送れない
   レンタルサーバーもある。`bin/setup.sh mail` で 1 通送って確かめる）
 - 元のサーバーの解約は、メールを移したあと。それまで MX は元のサーバーのまま
 
