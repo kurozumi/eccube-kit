@@ -267,9 +267,14 @@ bin/import.sh cutover --from=var/import/myshop --old-url=https://shop.example.jp
      いまの SPF があれば、その中に書き足す（2 つ並べると、どちらも効かなくなる）
    - 書き足すのは **`~all` / `-all` より前**（後ろに書いたものは見られない）。
      例: `v=spf1 include:old.example ~all` → `v=spf1 include:old.example include:<送信サービスの名前> ~all`
+   - **DNS を引く項目（`include` `a` `mx` `exists` `redirect`）は合わせて 10 個まで。** `include` の先の中身も数える。
+     超えると SPF 全体がエラーになり、どの送信元も通らない。書き足したあと、SPF の検査サイト（「SPF lookup count」で
+     探す）で数を見る。超えるなら、使っていない送信元を外すか、`include` の 1 つを `ip4:` / `ip6:` に書き換える
    - いまの送信元（元のサーバー）は消さない。元のサーバーのメールボックスから人が送るメールも、それで通っている
    - **`a` で元のサーバーを通している SPF**（`v=spf1 a mx ~all` の `a`）は、店の名前を向け替えると `a` が新しいサーバー
-     （tunnel なら Cloudflare）を指し、元のサーバーが通らなくなる。`a` を `ip4:<元のサーバーの IP>` に書き換えておく
+     （tunnel なら Cloudflare）を指し、元のサーバーが通らなくなる。`a` を、元のサーバーの IP に書き換えておく。
+     `dig +short A shop.example.jp` と `dig +short AAAA shop.example.jp` で、向け替える前に両方を控え、IPv4 は `ip4:<IP>`、
+     IPv6 があれば `ip6:<IP>` も足す（IPv6 で送っているサーバーは、`ip4` だけだとそちらが通らなくなる）。
      （`mx` は、2 で MX をメール用の名前へ移していれば、そのままでよい）
    - 変えてから、いまの SPF の TTL の時間がたつのを待つ。元のサーバーの SMTP で注文メールを送り続けるなら、
      SPF はいまのままでよい（外から SMTP で送れないレンタルサーバーもある。`bin/setup.sh mail` で 1 通送って確かめる）
