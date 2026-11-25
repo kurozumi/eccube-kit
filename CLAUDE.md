@@ -251,6 +251,12 @@ DoctrineMigrations / config / Plugin）と `html/user_data`（独自 CSS/JS）�
   差分の検査は削除に加えて**列の名前の変更**（`CHANGE a b` / `RENAME COLUMN`）も止める。
   **pipefail の下で `docker compose … | grep -q` を書かない。** grep が先に終わると compose が SIGPIPE で落ち、
   一致したのに「無い」になる（切り戻しが DB を起こさずに戻そうとして失敗した。5 回に 2 回）。変数に取ってから見る。
+- **`upgrade.sh` は系列をまたぐ（4.3 → 4.4）とき、店に触る前に点検して止まる**（`bin/lib/compat.sh`）。上げた先のイメージを引き、
+  `app/Customize` と `app/Plugin` を両方の版で PHPStan にかけて**上げた先でだけ出る誤りが 1 件でもあれば止める。点検できなくても
+  止める**（越えるのは `UPGRADE_ACCEPT_RISK=<プロジェクト名>`）。本体が変わった上書きテンプレートは挙げるだけ。確認はプロジェクト名、
+  本番は `--rehearsed` が無いと始めない。**4.4 の本体は PHPStan 2 向けの拡張（`vendor/phpstan/extension-installer`）を持ち、
+  1.x の phar は「incompatible extensions」で何も読まずに 1 を返す**（1 は「誤りあり」と同じ値なので、点検も `import.sh diagnose` も
+  素通りしていた）。その置き場を `--tmpfs` で覆い、それでも断られたら点検できなかったことにする。
 - **本番を上げるときは `bin/upgrade.sh <制約> --prod`。** `--prod` を落とすと
   `compose.override.yaml`（開発用のポートと bind mount）が効いた状態で公開される。
   **画面は出るので気づきにくい。** 稼働中なら自動でも寄せるが、停止中に打つと効かない。
