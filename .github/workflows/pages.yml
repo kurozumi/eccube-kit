@@ -91,17 +91,17 @@ jobs:
             fi
           done
 
-  # 古い URL（GitHub Pages）を新しい URL へ送るだけのページを配る
-  github-pages-redirect:
+  # 古い URL（GitHub Pages）を新しい URL へ送るだけのページを作る。
+  # **作る job と配る job を分ける。** 同じ job で upload-pages-artifact の直後に deploy-pages を呼ぶと、成果物が
+  # まだ見えず「No artifacts named "github-pages"」で落ちることがあった（v1.0.24・v1.0.25 のリリースで続けて落ち、
+  # 落ちた job だけ流し直すと、今度は前の回の成果物も見えて「Multiple artifacts」で落ちた）。成果物は job が
+  # 終わった時点で確定するので、別の job からなら見える（GitHub の公式の例も 2 つに分けている）
+  github-pages-build:
     runs-on: ubuntu-latest
     needs: cloudflare
     permissions:
       contents: read
       pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -136,5 +136,16 @@ jobs:
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: _redirect
+
+  github-pages-redirect:
+    runs-on: ubuntu-latest
+    needs: github-pages-build
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
       - id: deploy
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
