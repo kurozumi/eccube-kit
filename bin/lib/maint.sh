@@ -1,5 +1,16 @@
 # shellcheck shell=bash
-# メンテナンス表示まわりの共通の処理（deploy.sh / restore.sh / upgrade.sh / setup.sh が読む）。
+# メンテナンス表示まわりの共通の処理（deploy.sh / restore.sh / upgrade.sh / setup.sh / publish.sh が読む）。
+
+# maint_is_incident <compose を呼ぶコマンド…>
+#   bin/security.sh close で閉じている（.maintenance が incident で始まる）なら 0。
+#   そのあいだは deploy / publish を止める。`up -d` が、調査のために止めた nginx を起こしてしまうため。
+#   中身はパイプで読むが、tr は最後まで読むので compose が SIGPIPE で落ちることはない。
+maint_is_incident() {
+    local c
+    c="$("$@" exec -T ec-cube sh -c 'cat /var/www/html/.maintenance 2>/dev/null' 2>/dev/null | tr -d '\r' || true)"
+    case "$c" in incident*) return 0 ;; esac
+    return 1
+}
 
 # maint_drain <compose を呼ぶコマンド…>
 #   メンテナンス表示を立てた**あと**（自分で立てたものでも、手で入れてあったものでも）、立てる前に受け付けた

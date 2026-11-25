@@ -11,6 +11,8 @@ cd "$(dirname "$0")/.."
 . "$(dirname "$0")/lib/image.sh"
 # shellcheck source=lib/compose.sh
 . "$(dirname "$0")/lib/compose.sh"
+# shellcheck source=lib/maint.sh
+. "$(dirname "$0")/lib/maint.sh"
 
 # ── シークレットが既定値のまま本番公開するのを防ぐガード ──
 # どうしても既定値のまま起動したい場合のみ FORCE_PUBLISH=1 bin/publish.sh
@@ -61,6 +63,11 @@ fi
 # サービスの一覧は変数に取ってから見る。**pipefail の下で `compose … | grep -q` と書くと、grep が先に終わったときに
 # compose が SIGPIPE で落ち、一致したのに「無い」になる**（手元で 5 回に 2 回）。ここでは検査ごと飛ばしていた。
 services="$("${dc[@]}" config --services 2>/dev/null || true)"
+# 不審な兆候で閉じている（bin/security.sh close）あいだは起動しない。up -d が止めた nginx を起こし、店が開いてしまう
+if maint_is_incident "${dc[@]}"; then
+    echo "[publish] エラー: bin/security.sh close で閉じています（調査中）。開けるのは bin/security.sh open で。" >&2
+    exit 1
+fi
 if [ "${FORCE_PUBLISH:-0}" != "1" ] && printf '%s\n' "$services" | grep -qx db; then
     "${dc[@]}" up -d --wait db >/dev/null 2>&1 || true
     verdict="$("${dc[@]}" run --rm --no-deps -T --entrypoint php ec-cube < "$(dirname "$0")/lib/admin-password-check.php" 2>/dev/null | tail -1 || true)"
