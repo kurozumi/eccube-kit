@@ -50,9 +50,15 @@ fi
 dc=(docker compose $(compose_files --prod))
 
 # 配布イメージなら pull、そうでなければ build。**`up -d --build` と書かない。**
+# 引く前のイメージを控え、PHP のマイナー版が変わるなら止める（deploy.sh と同じ。bin/lib/image.sh）
+img_before="$(docker inspect --format '{{.Image}}' "$("${dc[@]}" ps -q ec-cube 2>/dev/null | head -1)" 2>/dev/null || true)"
+img_before="${img_before:-$(docker image inspect --format '{{.Id}}' "$(image_ref)" 2>/dev/null || true)}"
 if ! image_provision "${dc[@]}"; then
     echo "[publish] エラー: イメージを用意できませんでした。公開していません。" >&2
     exit 1
+fi
+if image_uses_registry; then
+    image_php_drift_guard "$img_before" "[publish] " "$("${dc[@]}" ps -q ec-cube 2>/dev/null | head -1)" || exit 1
 fi
 
 # ── 初期管理者が admin / password のままなら公開しない（#108）──

@@ -225,9 +225,14 @@ deploy_record "${planned:-?}" "$([ -d .git ] && echo pull || echo push)" "$by" "
 #
 # メンテナンスより前にやるのは、引き直しも build も数分かかりうるから。その間は古いサイトのまま動く。
 img_running="$(docker inspect --format '{{.Image}}' "$cid" 2>/dev/null || true)"
+# 止まっているときは、手元のタグが指しているイメージを「いまのもの」とみなす（PHP の比べ先）
+img_before="${img_running:-$(docker image inspect --format '{{.Id}}' "$(image_ref)" 2>/dev/null || true)}"
 if image_uses_registry; then
     log "配布イメージを引き直します: $(image_ref)"
-    if ! "${dc[@]}" pull --quiet ec-cube; then
+    if "${dc[@]}" pull --quiet ec-cube; then
+        # PHP のマイナー版が変わるなら止める（短いタグの既定が動いたとき。bin/lib/image.sh）。まだ何も変えていない
+        image_php_drift_guard "$img_before" "[deploy] " "$cid" || exit 1
+    else
         # 届かないのは GHCR の障害か回線。手元に同じ参照のイメージがあるなら、コードの反映まで
         # 止める理由にはしない。**無ければ止める。** そのまま進むと 4. の up -d が compose.yaml の
         # build: を見て手元で build し、配布物ではないイメージで公開してしまう
