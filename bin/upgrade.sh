@@ -84,6 +84,23 @@ current_php="$(grep -E '^PHP_VERSION=' .env 2>/dev/null | head -1 | cut -d= -f2-
 cid_now="$(docker compose ps -q ec-cube 2>/dev/null | head -1 || true)"
 running_php=""
 [ -n "$cid_now" ] && running_php="$(image_php_of_container "$cid_now")"
+# いまの EC-CUBE の版（表示と「戻すなら」の案内に使う）。**配布イメージの環境では .env の ECCUBE_VERSION を使わない。**
+# build しないので使われず、動いている版とずれていることがある（init.sh --image=…:4.2 でも既定の ~4.3.0 が残る。
+# 4.2 のまま上げたのに「~4.3.0 -> ~4.2.0」「戻すなら bin/upgrade.sh ~4.3.0」と出た）
+running_ver=""
+[ -n "$cid_now" ] && running_ver="$(image_eccube_of_container "$cid_now")"
+if [ -n "$current_image" ]; then
+    current_show="${running_ver:-?}"
+    back_to="${running_ver:+~$(printf '%s' "$running_ver" | cut -d. -f1-2).0}"
+    if [ -z "$running_ver" ]; then
+        # 止まっていて読めないときは、タグの系列（ec-cube:4.2・4.2-php8.2・4.2-v1.0.24）
+        tag_series="$(printf '%s' "${current_image##*:}" | sed -nE 's/^([0-9]+\.[0-9]+).*/\1/p')"
+        [ -z "$tag_series" ] || { current_show="${tag_series} 系（止まっているので細かい版は不明）"; back_to="~${tag_series}.0"; }
+    fi
+else
+    current_show="${current:-?}${running_ver:+（動いているのは ${running_ver}）}"
+    back_to="$current"
+fi
 # 実物を先に見る。配布イメージの -php 無しの固定タグ（4.3-v1.0.12）は、タグからは PHP が分からない
 if [ -n "$running_php" ]; then
     base_php="$running_php"
@@ -220,7 +237,7 @@ fi
 
 cat <<EOS
 [upgrade] EC-CUBE をバージョンアップします。
-          現在: ${current:-(未設定)}（PHP ${running_php:-${base_php:-?}}）
+          現在: ${current_show}（PHP ${running_php:-${base_php:-?}}）
           変更後: ${ver}（PHP ${php_ver}）
 
   残るもの : DB(${db_vol}) / アップロード画像(${proj}_eccube_upload)
@@ -619,7 +636,7 @@ rollback_upgrade() {
     trap '' INT TERM HUP
     local ok=1
     echo >&2
-    echo "[upgrade] 失敗しました。元の版（${current:-?}）に戻します..." >&2
+    echo "[upgrade] 失敗しました。元の版（${current_show}）に戻します..." >&2
     "${dc[@]}" down >/dev/null 2>&1 || true
     cp -p "$work/env.before" .env
     echo "[upgrade]   .env を上げる前の状態に戻しました" >&2
@@ -669,7 +686,7 @@ rollback_upgrade() {
             "${dc[@]}" exec -T ec-cube sh -c "grep -q '^upgrade:' $MAINT && rm -f $MAINT" 2>/dev/null || true
         fi
         cat >&2 <<EOS
-[upgrade] **元の版（${current:-?}）に戻して、開くことを確かめました。**$([ "$maint_on" = 1 ] && printf ' メンテナンス表示も外しました。')
+[upgrade] **元の版（${current_show}）に戻して、開くことを確かめました。**$([ "$maint_on" = 1 ] && printf ' メンテナンス表示も外しました。')
           上げられなかった原因は、上のエラーを見てください。
           上げる前のバックアップ: ${backup_dir}
 EOS
@@ -871,7 +888,8 @@ if [ "$keep_maint" = 0 ] && "${dc[@]}" exec -T ec-cube sh -c "grep -q '^upgrade:
 elif [ "$keep_maint" = 1 ]; then
     echo "[upgrade] メンテナンス表示は、始める前から入っていたものなので残しています。"
 fi
-echo "[upgrade] 完了。${current:-?} -> ${ver} へ更新しました。"
+new_ver="$(image_eccube_of_container "$("${dc[@]}" ps -q ec-cube 2>/dev/null | head -1)" 2>/dev/null || true)"
+echo "[upgrade] 完了。${current_show} -> ${new_ver:-$ver} へ更新しました。"
 bin/healthcheck.sh || true
 # オリジナルテーマを写してあるなら、本体側で変わった静的物を挙げる。
 # 写しはフォールバック無しで勝ち続けるので、**ここで見せないと誰も気づかない**。
@@ -888,5 +906,5 @@ if [ -f html/template/original/.base ] && [ "$(env_get ECCUBE_TEMPLATE_CODE)" = 
 fi
 echo "[upgrade] 管理画面とフロントの表示、受注データを必ず目視で確認してください。"
 echo "          上げる前の状態: バックアップ ${backup_dir} / 本体 ${prev_vol}（次の upgrade で置き換わります）"
-echo "          戻すなら: bin/upgrade.sh ${current:-<元の版>} のあと bin/restore.sh ${backup_dir}"
+echo "          戻すなら: bin/upgrade.sh ${back_to:-<元の版>} のあと bin/restore.sh ${backup_dir}"
 exit 0
