@@ -172,6 +172,11 @@ fi
 MAINT=/var/www/html/.maintenance
 ec() { docker compose exec -T ec-cube runuser -u www-data -- "$@"; }
 
+# 不審な兆候で閉じている（bin/security.sh close）あいだは出さない。up -d が止めた nginx を起こし、店が開いてしまう
+if maint_is_incident "${dc[@]}"; then
+    die "bin/security.sh close で閉じています（調査中）。調べ終わってから bin/security.sh open で開け、そのあとで deploy してください"
+fi
+
 # ── 0. 本番の守り ──
 # 何が出るかを先に見せ、本番ならプロジェクト名を打たせる。ここまでは何も変えない。
 is_prod=0; guard_is_prod_stack && is_prod=1

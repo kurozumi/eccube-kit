@@ -29,6 +29,9 @@ git add -A && git commit -m "何を直したか" && git push   # 控えを送る
 bin/deploy.sh --remote=<host>:<path>     # サーバーに反映（退避 → メンテ ON → pull → migration → 確認 → OFF）
 ```
 
+サーバーでは毎朝 `bin/security.sh check`（不審な管理者・ログイン・会員・注文・書き換えられたファイルを挙げる）。
+**侵入を疑ったら `bin/security.sh close`**（閉じて控えを取る。調べ終わるまで開けない。`docs/security.md`）。
+
 ## 公開（本番）
 
 サーバーを整えるのは手元から: `bin/bootstrap-server.sh user@host /srv/myshop`（Docker を入れ、

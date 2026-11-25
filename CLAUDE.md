@@ -401,6 +401,11 @@ DoctrineMigrations / config / Plugin）と `html/user_data`（独自 CSS/JS）�
   「Property Plugin\...\Group::$optionEntry does not exist」で画面が落ちる。
   **落ちるのが管理画面の別ページ（レイアウト管理など）なので、原因にたどり着きにくい。**
   `bin/plugin.sh doctor` が「インストール済みだが無効」として挙げる。
+- **`bin/security.sh check` はカーネルを起こさず、DATABASE_URL から PDO で読む**（`bin/lib/security-check.php`）。侵入を疑う場面は
+  キャッシュが壊れていることもあるので、本体に頼らない。会員・注文は**お客さんが入力する欄だけ**を見る（決済プラグインが足した列に
+  URL が入っていて、全列を見ると毎回引っかかる）。`close` は `.maintenance` に `incident`（`:` を入れない。`:` の後ろは素通りの
+  合い言葉になる）を書き、`deploy.sh` / `publish.sh` は `maint_is_incident` でそれを見て止まる（`up -d` が止めた nginx を起こすため）。
+  doctor・entrypoint・deploy はこの表示を外さない（外すのは `deploy:` などの印だけ）。4.2 + PostgreSQL、4.3 / 4.4 + MariaDB で確かめた。
 - **システムエラーが出たら `bin/plugin.sh doctor`。** 残骸の掃除・無効プラグインの
   検出・エンティティ拡張の反映確認・キャッシュの組み立て直し・主要ページの疎通確認まで
   やる。ページが落ちているときだけ直近の CRITICAL を出す。
@@ -569,6 +574,9 @@ bin/plugin.sh reload                                # PHP/config 変更後のキ
 bin/plugin.sh sync                                  # ファイルだけ新しいプラグインの DB を追いつかせる（deploy が呼ぶ）
 bin/plugin.sh watch                                 # 変更を見張って自動で reload
 bin/plugin.sh doctor                                # システムエラー時の点検と修復
+
+bin/security.sh check [--days=N]  # 不審な管理者・ログイン・会員・注文・ページ・プラグイン・git に無い変更・nginx（読むだけ）
+bin/security.sh close [--hard]    # 侵入を疑ったら閉じて var/incident/ に控える（deploy / publish も止まる）。open で開ける
 docker compose exec ec-cube runuser -u www-data -- php bin/console eccube:plugin:generate <Name>
 ```
 
