@@ -512,7 +512,7 @@ DoctrineMigrations / config / Plugin）と `html/user_data`（独自 CSS/JS）�
 | `docs/install.md` | 利用者向けの導入手順（取得 → 起動 → 更新の受け取り） |
 | `docs/customize.md` | 本体を汚さずに実装を足す場所、framework 級設定 |
 | `docs/upgrade.md` | バージョン切替とバージョンアップ、切り戻し |
-| `docs/import.md` | キットに載っていない店の取り込み（`bin/import.sh` の診断・流し込み・本番の切り替え） |
+| `docs/import.md` | キットに載っていない店の取り込み（`bin/import.sh` の診断・流し込み・本番の切り替え、DNS の向け替え） |
 | `docs/deploy.md` | 本番デプロイ |
 | `docs/distribute.md` | 配布と更新（配布イメージ、`bin/self-update.sh`） |
 | `docs/backup.md` | バックアップ / 復元 |
