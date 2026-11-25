@@ -23,7 +23,7 @@
 bin/import.sh fetch shop@old.example.jp:/var/www/eccube
 bin/import.sh diagnose var/import/old.example.jp
 
-# SSH が無いなら、FTP で落としたフォルダ（か zip）と、phpMyAdmin などで取った DB のダンプを整えてから
+# SSH が無いなら、FTP で落としたフォルダ（か zip）と、phpMyAdmin・Adminer などで取った DB のダンプを整えてから
 bin/import.sh unpack ~/受け取り/public_html --dump=~/受け取り/eccube.sql --name=myshop
 bin/import.sh diagnose var/import/myshop
 ```
@@ -104,7 +104,8 @@ FTP とサーバーの管理画面で取って、`bin/import.sh unpack` で整�
    `ECCUBE_AUTH_MAGIC` と DB の接続先が入っている）。サーバーの管理画面のファイルマネージャーで zip に固めて落としても
    よい（zip / tar.gz をそのまま渡せる）
 2. **DB**: サーバーの管理画面のバックアップ機能（mysqldump の形で出るものが多い）か、phpMyAdmin の「エクスポート」
-   （既定のまま、形式は SQL）。`.sql`・`.sql.gz`・それを 1 つ入れた `.zip` のどれでもよい
+   （既定のまま、形式は SQL）か、Adminer の「エクスポート」（既定のまま。出力は「保存」か「gzip」、形式は SQL）。
+   **MySQL / MariaDB の店に限る**（Adminer の PostgreSQL の書き出しはシーケンスなどを全部は書かないので受けない）。`.sql`・`.sql.gz`・それを 1 つ入れた `.zip` のどれでもよい
 
 ```bash
 bin/import.sh unpack ~/受け取り/public_html --dump=~/受け取り/eccube.sql --name=myshop
@@ -114,13 +115,13 @@ bin/import.sh unpack ~/受け取り/public_html --dump=~/受け取り/eccube.sql
 
 - フォルダ（か書庫）から EC-CUBE の場所を探し（`src/Eccube/Common/Constant.php`）、`vendor`・`var`・キャッシュを
   除いて写す。書庫は使い捨てのコンテナの中で開き、外へ書き出そうとする名前（`../`）やリンクがあれば入れない
-- **phpMyAdmin のダンプは、使い捨ての DB（MySQL 8 か MariaDB 10.11。ダンプの見出しの版で選ぶ）に一度入れて、
+- **phpMyAdmin・Adminer のダンプは、使い捨ての DB（MySQL 8 か MariaDB 10.11。ダンプの見出しの版で選ぶ）に一度入れて、
   mysqldump で取り直す。** phpMyAdmin の書き出しには「最後まで書いた」の印が無く、`CREATE TABLE` の前に `DROP` も
   無いので、そのままでは `bin/restore.sh` が受け付けない。入れて取り直すことで、入りきるか・EC-CUBE の表が
   そろっているか（一部の表だけを選んで書き出していないか）も確かめる。元の DB の版は `meta.env` に残し、報告書に出す
 - **途中で切れたダンプは止める。** レンタルサーバーの phpMyAdmin は大きい DB で時間切れになり、途中までのファイルを
   正常に渡してくる。最後に `COMMIT` も文字コードの戻しも無ければ止める（そのときはサーバーのバックアップ機能か、
-  gzip 圧縮で書き出し直す）
+  gzip 圧縮で書き出し直す）。Adminer は書き終えたときだけ最後に `-- <日時> UTC` の 1 行を書くので、それが無ければ止める
 
 取り込み（`load`）には商品画像（`html/upload`）が要る。FTP で丸ごと落としていれば入っている。
 サーバーの様子（PHP・メモリ・cron）は分からないので、報告書は cron を店に聞く項目にする（管理画面の「cron 設定」）。
@@ -210,9 +211,10 @@ bin/import.sh cutover --from=var/import/myshop --old-url=https://shop.example.jp
 
 ### 分かっていること
 
-- 確かめたのは手元の試験（4.2.3-p2・MySQL 8 の店、phpMyAdmin 5.2 の日本語の画面で書き出したもの）まで。本物の
-  レンタルサーバーの管理画面のバックアップ機能の形（会社ごとに違う）は、1 店目で確かめる。mysqldump・phpMyAdmin
-  以外の形（Adminer など）は、いまは受け付けない
+- 確かめたのは手元の試験（4.2.3-p2・MySQL 8 の店、phpMyAdmin 5.2 の日本語の画面で書き出したもの、Adminer 6.3.1 と
+  4.8.1 で MySQL 8 と MariaDB 10.11 から書き出したもの）まで。Adminer 4.x は MariaDB でも種類を MySQL と書き、
+  最後の日時に `UTC` を付けないが、版の側に MariaDB が入るので同じく読める。本物のレンタルサーバーの管理画面の
+  バックアップ機能の形（会社ごとに違う）は、1 店目で確かめる。mysqldump・phpMyAdmin・Adminer 以外の形は受け付けない
 
 - **元の店の DB に、本体の migration の記録が 1 件も無いことが多い。** EC-CUBE のインストーラ（画面からも
   `eccube:install` も）は表を作るだけで、migration を記録しない（`doctrine_migration_versions` を消して終わる）。

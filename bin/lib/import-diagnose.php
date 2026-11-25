@@ -315,7 +315,7 @@ if (is_file('/meta.env')) {
         if ($k === 'cron') $crons[] = $v; else $meta[$k] = $v;
     }
 }
-// unpack で整えたもの: サーバーの様子は無い。phpMyAdmin のダンプは取り直しているので、元の DB の版は meta に残っている
+// unpack で整えたもの: サーバーの様子は無い。phpMyAdmin・Adminer のダンプは取り直しているので、元の DB の版は meta に残っている
 $archive = ($meta['source'] ?? '') === 'archive';
 if (!empty($meta['db_server'])) {
     $dump_info['server'] = $meta['db_server'];
@@ -371,7 +371,7 @@ $L[] = '|---|---|';
 $L[] = "| EC-CUBE | {$from_ver} |";
 $L[] = '| DB | ' . md($db_kind) . ($dump_info['server'] ? '（' . md($dump_info['server']) . '）' : '') . ' `' . md(mask_url($db_url)) . '` |';
 $L[] = '| DB のダンプ | ' . ($dump ? human($dump_info['bytes']) . ($dump_info['complete'] ? '・完了の行あり' : '・**完了の行なし**') : '受け取っていない')
-    . (($meta['dump_from'] ?? '') === 'phpmyadmin' ? '（phpMyAdmin の書き出しを、使い捨ての DB に入れて取り直したもの）' : '') . ' |';
+    . (['phpmyadmin' => '（phpMyAdmin の書き出しを、使い捨ての DB に入れて取り直したもの）', 'adminer' => '（Adminer の書き出しを、使い捨ての DB に入れて取り直したもの）'][$meta['dump_from'] ?? ''] ?? '') . ' |';
 $L[] = "| 使っているテーマ | {$theme} |";
 $L[] = "| 管理画面の URL | /{$admin_route} |";
 $L[] = "| 商品画像など（html/upload） | {$up_n} ファイル・" . human($up_bytes) . ' |';

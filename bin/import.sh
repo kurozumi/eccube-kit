@@ -6,8 +6,8 @@
 #       置き場は var/import/<名前>/。商品画像（html/upload）と vendor は取らない（数と大きさだけ数える）。
 #   bin/import.sh unpack <フォルダ | zip | tar.gz> --dump=<.sql | .sql.gz | .zip> [--name=<名前>]
 #       SSH が使えないレンタルサーバー向け。FTP で落としたフォルダ（または管理画面で固めた zip）と、サーバーの管理画面
-#       （phpMyAdmin・バックアップ機能）で取った DB のダンプを、fetch で取ったのと同じ形（var/import/<名前>/）に整える。
-#       phpMyAdmin のダンプは、使い捨ての DB に一度入れて mysqldump で取り直す（入りきるか・表がそろっているかを確かめる）。
+#       （phpMyAdmin・Adminer・バックアップ機能）で取った DB のダンプを、fetch で取ったのと同じ形（var/import/<名前>/）に整える。
+#       phpMyAdmin・Adminer のダンプは、使い捨ての DB に一度入れて mysqldump で取り直す（入りきるか・表がそろっているかを確かめる）。
 #       以降の diagnose / load はそのまま使える。
 #   bin/import.sh diagnose <店のフォルダ> [--dump=<ダンプ>] [--to=4.3]
 #       取ってきたもの（または店から受け取った zip を展開したフォルダ）を調べ、報告書を作る。
@@ -188,7 +188,7 @@ cmd_fetch() {
         log "DB のダンプ: ${dest}/dump.sql.gz（$(du -h "${dest}/dump.sql.gz" | cut -f1)）"
     else
         rm -f "${dest}/dump.sql.gz.part"
-        log "注意: DB をダンプできませんでした（向こうに mysqldump / pg_dump が無い、など）。サーバーの管理画面（phpMyAdmin など）で取り、bin/import.sh unpack ${dest}/files --dump=<ファイル> で整えてください"
+        log "注意: DB をダンプできませんでした（向こうに mysqldump / pg_dump が無い、など）。サーバーの管理画面（phpMyAdmin・Adminer など）で取り、bin/import.sh unpack ${dest}/files --dump=<ファイル> で整えてください"
     fi
     echo
     log "取ってきました: ${dest}"
@@ -280,6 +280,9 @@ unpack_dump() { # unpack_dump <ダンプ> <DB の種類 mysql|postgresql> <出�
     head="$(dump_cat 2>/dev/null | head -c 8192 | head -40)" || true
     tail="$(dump_cat | tail -c 2048)" || die "ダンプを読めませんでした: $in"
     dump_server="$(printf '%s\n' "$head" | sed -nE 's/^-- .*(Server version|サーバのバージョン|サーバーのバージョン|Dumped from database version)[:：]?[[:space:]]*(.+)$/\2/p' | head -1 | tr -d '\r')"
+    # Adminer は 1 行目に「-- Adminer <版> <DB の種類> <サーバーの版> dump」。MariaDB でも種類は MySQL と書き、版の側に MariaDB が入る
+    [ -n "$dump_server" ] || dump_server="$(printf '%s\n' "$head" | sed -nE '1s/^-- Adminer [^ ]+ (.+) dump[[:space:]]*$/\1/p' | tr -d '\r')"
+    local reload_what=""
 
     case "$head" in
         *"-- PostgreSQL database dump"*)
@@ -298,13 +301,27 @@ unpack_dump() { # unpack_dump <ダンプ> <DB の種類 mysql|postgresql> <出�
                 || die "phpMyAdmin のダンプが途中で切れているようです（最後に COMMIT も文字コードの戻しもありません）。
          大きい DB は phpMyAdmin が時間切れで途中までしか書かないことがあります。サーバーの管理画面の「MySQL バックアップ」
          などの機能で取り直すか、gzip 圧縮で書き出してください"
-            dump_from=phpmyadmin ;;
+            dump_from=phpmyadmin; reload_what=phpMyAdmin ;;
+        "-- Adminer "*)
+            case "$(printf '%s\n' "$head" | head -1)" in
+                *" PostgreSQL "*)
+                    # Adminer の PostgreSQL の書き出しは pg_dump と違い、シーケンスや型を全部は書かない。取り直せる形にならないので受けない
+                    die "Adminer で書き出した PostgreSQL のダンプは受け付けていません。pg_dump で取ってください（サーバーの管理画面の
+         バックアップ機能、または pg_dump が打てる場所から）" ;;
+            esac
+            [ "$engine" = mysql ] || die "Adminer の MySQL のダンプですが、店の .env の DATABASE_URL は PostgreSQL です"
+            # Adminer は書き終えたときだけ、最後に「-- <日時> UTC」の 1 行を書く。時間切れで止まったファイルには無い
+            printf '%s' "$tail" | tr -d '\r' | grep -v '^[[:space:]]*$' | tail -1 | grep -qE '^-- [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}' \
+                || die "Adminer のダンプが途中で切れているようです（最後に書き出した日時の行がありません）。
+         大きい DB は Adminer が時間切れで途中までしか書かないことがあります。サーバーの管理画面の「MySQL バックアップ」
+         などの機能で取り直してください"
+            dump_from=adminer; reload_what=Adminer ;;
         *)
-            die "ダンプの形が分かりません（mysqldump・pg_dump・phpMyAdmin のどれかで書き出してください）。先頭:
+            die "ダンプの形が分かりません（mysqldump・pg_dump・phpMyAdmin・Adminer のどれかで書き出してください）。先頭:
 $(printf '%s\n' "$head" | head -3 | sed 's/^/         /')" ;;
     esac
 
-    # phpMyAdmin のダンプは使い捨ての DB に入れて、mysqldump で取り直す。入りきるか、表がそろっているかもここで分かる
+    # phpMyAdmin・Adminer のダンプは使い捨ての DB に入れて、mysqldump で取り直す。入りきるか、表がそろっているかもここで分かる
     local img client dumper
     case "$dump_server" in
         *[Mm]aria[Dd][Bb]*) img=mariadb:10.11; client=mariadb; dumper=mariadb-dump ;;
@@ -315,7 +332,7 @@ $(printf '%s\n' "$head" | head -3 | sed 's/^/         /')" ;;
     pw="$(openssl rand -hex 16)"
     c="eccube-import-dump-$$"
     dump_container="$c"   # cmd_unpack の EXIT が消す（die でも残さない）
-    log "phpMyAdmin のダンプを、使い捨ての DB（${img}）に入れて確かめます..."
+    log "${reload_what} のダンプを、使い捨ての DB（${img}）に入れて確かめます..."
     docker run -d --name "$c" --network none -e MYSQL_ROOT_PASSWORD="$pw" -e MARIADB_ROOT_PASSWORD="$pw" \
         -e MYSQL_DATABASE=shop -e MARIADB_DATABASE=shop "$img" --max-allowed-packet=1G >/dev/null \
         || die "使い捨ての DB を起動できませんでした"
@@ -328,7 +345,7 @@ $(printf '%s\n' "$head" | head -3 | sed 's/^/         /')" ;;
         i=$((i + 1)); [ "$i" -lt 180 ] || die "使い捨ての DB が起動しません（docker logs ${c}）"; sleep 1
     done
     local lerr; lerr="$(mktemp)"
-    if ! dump_cat | sed -e '/^USE /d' -e '/^CREATE DATABASE /d' \
+    if ! dump_cat | sed -e '/^USE /d' -e '/^CREATE DATABASE /d' -e '/^DROP DATABASE /d' \
         | docker exec -i -e MYSQL_PWD="$pw" "$c" "$client" -uroot --default-character-set=utf8mb4 --max-allowed-packet=1G shop 2>"$lerr"; then
         local e; e="$(head -5 "$lerr")"; rm -f "$lerr"
         die "ダンプを DB に入れられませんでした（${img}）:
@@ -337,7 +354,7 @@ $(printf '%s\n' "$e" | sed 's/^/         /')"
     rm -f "$lerr"
     local have
     have="$(docker exec -e MYSQL_PWD="$pw" "$c" "$client" -uroot -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='shop' AND table_name IN ('dtb_base_info','dtb_customer','dtb_order','dtb_product','dtb_plugin','dtb_member')")"
-    [ "$have" = 6 ] || die "ダンプに EC-CUBE の表がそろっていません（${have}/6）。phpMyAdmin で一部の表だけを選んで書き出していませんか"
+    [ "$have" = 6 ] || die "ダンプに EC-CUBE の表がそろっていません（${have}/6）。${reload_what} で一部の表だけを選んで書き出していませんか"
     docker exec -e MYSQL_PWD="$pw" "$c" "$dumper" -uroot --default-character-set=utf8mb4 --single-transaction --quick \
         --no-tablespaces --routines --triggers shop | gzip -c > "$out" || die "取り直せませんでした"
     gunzip -c "$out" | tail -c 1024 | grep -q -- '-- Dump completed' || die "取り直したダンプに完了の行がありません"

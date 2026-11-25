@@ -532,7 +532,7 @@ bin/deploy.sh                  # 自分のコードを反映。退避→メン�
                                # キャッシュ→疎通→OFF。失敗したら ON のまま止まる（壊れた画面を出さない）
 bin/self-update.sh             # この環境自体を新しいリリースへ（--check で確認だけ）
 bin/import.sh fetch|diagnose   # キットに載っていない店を読むだけで調べる（docs/import.md）
-bin/import.sh unpack <フォルダ|zip> --dump=<ダンプ>  # SSH が無い店: FTP で落としたものと phpMyAdmin のダンプを fetch と同じ形に
+bin/import.sh unpack <フォルダ|zip> --dump=<ダンプ>  # SSH が無い店: FTP で落としたものと phpMyAdmin・Adminer のダンプを fetch と同じ形に
 bin/import.sh load <取ったもの>  # それをまっさらなキットへ同じ版のまま流し込む（restore.sh を使う）
 bin/import.sh plugins pack|add  # git に入らないプラグインを、リハーサルの環境から本番のキットへ運ぶ（add は置くだけ。DB は cutover）
 bin/import.sh cutover <元の店>  # 本番の切り替え。元の店をメンテナンスにしてデータだけ入れ、upgrade.sh で合わせる。失敗したら元の店を開け直す
