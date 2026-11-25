@@ -1,0 +1,123 @@
+# EC-CUBE 公式のセキュリティ情報を見張り、増えたら Issue を開く（docs/security-updates.md「EC-CUBE 公式の情報」）。
+#
+# 毎日見るもの（.github/scripts/ec_cube_watch.py）:
+#   - 脆弱性リスト（www.ec-cube.net/info/weakness/）
+#   - GitHub の EC-CUBE/ec-cube のセキュリティ勧告
+#   - 開発者向けのセキュリティガイドライン（EC-CUBE/doc4.ec-cube.net の _pages/security-guideline/）
+# 増えたら、ラベル `ec-cube-watch` の Issue を 1 つ開く（閉じるのは人。対応が済んだら閉じる）。
+# 前回の状態は、そのラベルのいちばん新しい Issue（閉じたものを含む）の本文に隠して持つ。リポジトリには書かない。
+# 初回は「見張りを始めた」Issue を開いてすぐ閉じる（いまある全部を「増えた」と言わない）。
+# 読めなかった元は前回を引き継ぎ、ラベル `ec-cube-watch-error` の Issue を 1 つだけ開く（読めたら閉じる）。
+#
+# 月 1 回（1 日）: サイト運営者向けの「セキュリティ対策ガイドライン」（www.ec-cube.net/security/guideline/）を
+# 見るよう、ラベル `ec-cube-guideline` の Issue で人に知らせる。あのページはブラウザの確認がかかっていて、
+# 機械では読めない（すり抜けない）。
+name: ec-cube-watch
+
+on:
+  schedule:
+    - cron: "30 19 * * *"   # 毎日 04:30 JST（security-scan のあと）
+    - cron: "0 0 1 * *"     # 毎月 1 日 09:00 JST（ガイドラインの確認の知らせ）
+  workflow_dispatch:
+    inputs:
+      guideline_reminder:
+        description: "ガイドラインの確認の知らせも出す"
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - ".github/workflows/ec-cube-watch.yml"
+      - ".github/scripts/ec_cube_watch.py"
+
+concurrency:
+  group: ec-cube-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 前回の状態を読む
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          : > prev.json
+          body="$(gh issue list --label ec-cube-watch --state all --limit 1 --json body -q '.[0].body // ""' 2>/dev/null || true)"
+          b64="$(printf '%s\n' "$body" | sed -nE 's/.*ec-cube-watch-state: ([A-Za-z0-9+/=]+).*/\1/p' | head -1)"
+          if [ -n "$b64" ]; then printf '%s' "$b64" | base64 -d > prev.json; fi
+          echo "前回の状態: $(wc -c < prev.json) バイト"
+
+      - name: 見る
+        id: watch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/scripts/ec_cube_watch.py prev.json out | tee -a "$GITHUB_OUTPUT"
+          echo "::group::いまの一覧"; cat out/all.md; echo "::endgroup::"
+          cat out/report.md
+
+      - name: Issue を開く
+        # PR では Issue を触らない（結果はログで見る）
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANGED: ${{ steps.watch.outputs.changed }}
+          ERRORS: ${{ steps.watch.outputs.errors }}
+          FIRST: ${{ steps.watch.outputs.first }}
+        run: |
+          gh label create ec-cube-watch --color 1D76DB --description "EC-CUBE 公式のセキュリティ情報が増えた（ec-cube-watch.yml）" 2>/dev/null || true
+          gh label create ec-cube-watch-error --color FBCA04 --description "EC-CUBE 公式の情報を読めなかった（ec-cube-watch.yml）" 2>/dev/null || true
+          gh label create security --color B60205 --description "セキュリティ関連" 2>/dev/null || true
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          marker="<!-- ec-cube-watch-state: $(base64 -w0 out/state.json) -->"
+          if [ "$FIRST" = true ]; then
+            { echo "EC-CUBE 公式のセキュリティ情報の見張りを始めました。次からは、ここから増えたものだけを知らせます。"; echo
+              cat out/all.md; echo "$marker"; } > body.md
+            num="$(gh issue create --title "EC-CUBE 公式情報の見張りを始めました" --label ec-cube-watch --body-file body.md | sed -nE 's#.*/issues/([0-9]+)$#\1#p')"
+            gh issue close "$num" --comment "初回の記録なので閉じます（${run_url}）。"
+          elif [ "$CHANGED" = true ]; then
+            { cat out/report.md; echo; echo "<details><summary>いまの一覧</summary>"; echo; cat out/all.md; echo "</details>"; echo
+              echo "（${run_url}）"; echo "$marker"; } > body.md
+            gh issue create --title "EC-CUBE の公式セキュリティ情報が増えました（$(TZ=Asia/Tokyo date +%F)）" \
+              --label ec-cube-watch --label security --body-file body.md
+          fi
+          # 読めなかったときの Issue は 1 つだけ。読めたら閉じる
+          err="$(gh issue list --label ec-cube-watch-error --state open --json number -q '.[0].number')"
+          if [ "$ERRORS" = true ] && [ -z "$err" ]; then
+            { sed -n '/^## 読めなかったもの/,$p' out/report.md; echo; echo "（${run_url}）"; } > err.md
+            gh issue create --title "EC-CUBE 公式の情報を読めませんでした" --label ec-cube-watch-error --body-file err.md
+          elif [ "$ERRORS" != true ] && [ -n "$err" ]; then
+            gh issue close "$err" --comment "読めるようになったので閉じます（${run_url}）。"
+          fi
+
+  guideline:
+    # 月 1 回の知らせ。手動のときは入力で選ぶ
+    if: github.event.schedule == '0 0 1 * *' || (github.event_name == 'workflow_dispatch' && inputs.guideline_reminder)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 知らせる
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh label create ec-cube-guideline --color 1D76DB --description "月 1 回: EC-CUBE セキュリティ対策ガイドラインの確認（ec-cube-watch.yml）" 2>/dev/null || true
+          if [ -n "$(gh issue list --label ec-cube-guideline --state open --json number -q '.[0].number')" ]; then
+            echo "前の月の知らせがまだ開いています。新しく開きません"; exit 0
+          fi
+          cat > body.md <<'EOF'
+          EC-CUBE 公式の「[セキュリティ対策ガイドライン](https://www.ec-cube.net/security/guideline/)」（サイト運営者向け）に更新が無いか、ブラウザで開いて見てください。このページは機械では読めないので、月 1 回こうして知らせています。
+
+          - 変わっていなければ、この Issue を閉じる
+          - 変わっていたら、ページ全体のスクリーンショット（または本文）を手元の Claude Code に渡し、`docs/security.md` に反映してもらう
+
+          いまの `docs/security.md` は 2026-11 時点のガイドラインに合わせています。
+          EOF
+          gh issue create --title "月例: EC-CUBE セキュリティ対策ガイドラインを確認する（$(TZ=Asia/Tokyo date +%Y-%m)）" --label ec-cube-guideline --body-file body.md

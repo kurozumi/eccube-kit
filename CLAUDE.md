@@ -84,7 +84,9 @@ DoctrineMigrations / config / Plugin）と `html/user_data`（独自 CSS/JS）�
   設定の決まり（固め・公開範囲・秘密の渡し方・ヘッダ）は `.github/scripts/config_check.py` が展開後の compose で見て、
   compose / docker/ を変える PR を `config-check.yml` が落とす。**決まりを変えたら、このファイルとあちらを揃える。**
   `security-scan.yml` が全イメージを Trivy と保守期限（endoflife.date）で調べ、要対応ならラベル
-  `security-scan` の Issue を 1 つ開く。判断と PR は人（手元の Claude Code に Issue を渡してよい。定期のルーティンは費用の都合で止めてある）。**マージとリリースは人。**
+  `security-scan` の Issue を 1 つ開く。**EC-CUBE 本体の脆弱性は Trivy では見ない**ので、`ec-cube-watch.yml` が公式の脆弱性リスト・
+  GitHub の勧告・開発者向けガイドを毎日読み、増えたら `ec-cube-watch` の Issue を開く（前回の状態はそのラベルの最新の Issue の本文に
+  隠して持つ）。サイト運営者向けのガイドラインはブラウザの確認があって読めないので、毎月 1 日に人へ知らせる。判断と PR は人（手元の Claude Code に Issue を渡してよい。定期のルーティンは費用の都合で止めてある）。**マージとリリースは人。**
   **系列タグ（`nginx:1.30-alpine`）は名前が変わらないので、引き直さない限り古いまま。**
   `bin/deploy.sh` は v1.0.16 まで ec-cube しか pull しておらず、nginx は最初に引いた日の版で
   止まっていた。いまは `pull --ignore-buildable` で全部引き直す。
