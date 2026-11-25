@@ -480,6 +480,32 @@ if [ -n "$extra_lost" ]; then
     read -r ans_extra
     [ "$ans_extra" = "y" ] || { echo "[upgrade] 中止しました。稼働中の環境には触れていません。"; restore_env; exit 1; }
 fi
+# site_code <path> … メンテナンス中でも token の cookie で中を見る（deploy.sh と同じ）
+site_code() {
+    local port
+    port="$("${dc[@]}" port nginx 80 2>/dev/null | tail -1 | sed -E 's/^(0\.0\.0\.0|\[::\]):/localhost:/')"
+    [ -n "$port" ] || port="localhost:$(env_get HTTP_PORT)"
+    case "$port" in *:) port="${port}8080" ;; esac
+    # X-Forwarded-Proto: https を付ける。付けないと ECCUBE_FORCE_SSL の店は https への転送（301/302）を返し、
+    # 画面を組み立てずに「開いた」ことになる
+    curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' -b "maintenance_token=${token:-}" "http://${port}${1}" || echo 000
+}
+
+# 上げたあとに、トップと商品一覧のほかにも開くかを確かめるページ。**上げる前に開いていたものだけ**を確かめる
+# （もともと 500 のページがあると、上げるたびに失敗して戻ってしまう）。落ちたと見なすのは 500 番台と無応答だけ。
+# 会員限定のサイトの転送（302）、管理画面の IP 制限（403）、消したページ（404）は落ちたことにしない。
+# 画面は開くのに、プラグインのフォームや差し込みが新しい版で壊れて、そのページだけ 500 になる、を拾う。
+extra_pages=""
+if [ "${UPGRADE_SKIP_PAGE_CHECK:-0}" != 1 ] && [ -n "$("${dc[@]}" ps -q --status running ec-cube 2>/dev/null)" ]; then
+    admin_route="$(env_get ECCUBE_ADMIN_ROUTE)"
+    for pth in /cart /entry /contact /mypage/login /help/about "/${admin_route:-admin}/login"; do
+        c="$(site_code "$pth")"
+        case "$c" in
+            000|5*) echo "[upgrade] 注意: 上げる前から ${pth} が開いていません（${c}）。上げたあとも、ここは確かめません。" ;;
+            *) extra_pages="${extra_pages} ${pth}" ;;
+        esac
+    done
+fi
 # 4) メンテナンス表示にしてから、バックアップを取る。
 #    **表示より先に取ると、取ってから止めるまでの間に入った注文がバックアップに無い。** 失敗して DB を
 #    戻したときに、その注文が消える。表示の中で取り、公開前の確認もその中でする。
@@ -599,16 +625,6 @@ prev_vol="${app_vol}_before_upgrade"
 vol_saved=0      # 本体ボリュームを写した
 vol_removed=0    # 本体ボリュームを消した（消せていなければ、戻す必要は無い）
 db_touched=0     # DB に書いた（スキーマ更新を始めた）
-# site_code <path> … メンテナンス中でも token の cookie で中を見る（deploy.sh と同じ）
-site_code() {
-    local port
-    port="$("${dc[@]}" port nginx 80 2>/dev/null | tail -1 | sed -E 's/^(0\.0\.0\.0|\[::\]):/localhost:/')"
-    [ -n "$port" ] || port="localhost:$(env_get HTTP_PORT)"
-    case "$port" in *:) port="${port}8080" ;; esac
-    # X-Forwarded-Proto: https を付ける。付けないと ECCUBE_FORCE_SSL の店は https への転送（301/302）を返し、
-    # 画面を組み立てずに「開いた」ことになる
-    curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' -b "maintenance_token=${token}" "http://${port}${1}" || echo 000
-}
 wait_site() { # wait_site <秒>
     local deadline=$(( $(date +%s) + $1 )) code path
     while [ "$(date +%s)" -lt "$deadline" ]; do
@@ -625,6 +641,24 @@ wait_site() { # wait_site <秒>
     done
     echo "[upgrade] 応答: ${code:-000}（${path:-/}）" >&2
     return 1
+}
+# 上げる前に開いていたページが、500 番台で落ちていないか（組み立て直後の揺れは 60 秒まで待つ）
+check_pages() {
+    local deadline=$(( $(date +%s) + 60 )) bad pth c
+    [ -n "$extra_pages" ] || return 0
+    while :; do
+        bad=""
+        for pth in $extra_pages; do
+            c="$(site_code "$pth")"
+            case "$c" in 000|5*) bad="${bad} ${pth}（${c}）" ;; esac
+        done
+        [ -z "$bad" ] && return 0
+        if [ "$(date +%s)" -ge "$deadline" ]; then
+            echo "[upgrade] 上げる前は開いていたのに、開かなくなったページ:${bad}" >&2
+            return 1
+        fi
+        sleep 5
+    done
 }
 # 公開前（メンテナンス表示の中）に開くかを見る時間。大きな店はキャッシュの組み立てに数分かかる
 health_wait="${UPGRADE_HEALTH_TIMEOUT:-600}"
@@ -878,6 +912,11 @@ echo "[upgrade] 起動します（メンテナンス表示のまま）..."
 echo "[upgrade] 開くかを確かめています（最大 ${health_wait} 秒。キャッシュの組み立てに数分かかることがあります）..."
 if ! wait_site "$health_wait"; then
     echo "[upgrade] エラー: 新しい版が開きませんでした（ログ: docker compose logs ec-cube）。" >&2
+    rollback_upgrade
+fi
+echo "[upgrade] ほかのページも開くかを確かめています:${extra_pages:- （無し）}"
+if ! check_pages; then
+    echo "[upgrade] エラー: 新しい版で開かないページがあります（プラグインやテンプレートが新しい版に合っていない見込み。ログ: docker compose logs ec-cube）。" >&2
     rollback_upgrade
 fi
 trap - ERR INT TERM HUP
