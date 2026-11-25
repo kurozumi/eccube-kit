@@ -103,7 +103,7 @@
 以下はこのリポジトリ自体を開発する場合。
 
 ```bash
-git clone <this-repo> eccube-docker && cd eccube-docker
+git clone <this-repo> eccube-kit && cd eccube-kit
 bin/init.sh                       # .env 作成・秘密の生成・build & up（本体を手元でビルド。10 分以上）
 
 # ビルドせずに済ませるなら（数十秒。PHP はタグで選ぶ）

@@ -26,7 +26,7 @@ EC-CUBE 本体を汚さずに独自の実装を足す場所と、その決まり
     ```bash
     git clone git@github.com:you/my-awesome-plugin.git app/Plugin/MyAwesomePlugin
     ```
-  - 導入したプラグインは各自の repo で管理する前提で、eccube-docker 側の git には追跡させない
+  - 導入したプラグインは各自の repo で管理する前提で、eccube-kit 側の git には追跡させない
   - **プラグインの画面やメール文面を直すときは `app/template/plugin/<Code>/` に置く。
     プラグインは触らない。管理画面からも直さない（履歴が残らないため）。**
 

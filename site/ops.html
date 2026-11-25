@@ -23,7 +23,7 @@
 
 <header class="pagehead">
   <div class="wrap">
-    <p class="eyebrow">eccube-docker · __TAG__</p>
+    <p class="eyebrow">eccube-kit · __TAG__</p>
     <h1>更新と反映</h1>
     <p class="lede">パッチはその日のうちに当て、失敗したら元に戻し、本番にはレビュー済みのものしか出さない。そのための置き場所の分け方と、先に退避する仕組みと、3 枚の壁です。</p>
   </div>
@@ -34,7 +34,7 @@
     <h2>パッチは<em class="k">その日のうちに</em></h2>
     <p class="sub">EC-CUBE のパッチ（4.3.1 → 4.3.2 など）は、やることが 2 つだけ。プラグインの移植が要るのはメジャー・マイナー（4.3 → 4.4）だけです。</p>
     <div class="steps">
-      <div class="step"><div class="num">1</div><h3>環境（eccube-docker）を新しくする</h3><pre>bin/self-update.sh</pre><p>コマンド・compose・スクリプトが新しいリリースに揃う。差分は git で見えるので、何が変わるか分かってから進める。</p></div>
+      <div class="step"><div class="num">1</div><h3>環境（eccube-kit）を新しくする</h3><pre>bin/self-update.sh</pre><p>コマンド・compose・スクリプトが新しいリリースに揃う。差分は git で見えるので、何が変わるか分かってから進める。</p></div>
       <div class="step"><div class="num">2</div><h3>EC-CUBE を上げる</h3><pre>bin/upgrade.sh ~4.3.0 --prod</pre><p>新しい EC-CUBE でプラグインが動くかを、お店に触る前に確認 → メンテナンス表示 → 退避 → migration → 疎通。失敗したら自動で元の版に戻る。<strong>危ないものを見つけたら、お店に触る前に止まる。</strong></p></div>
     </div>
     <h3 style="font-family:var(--f-display);font-size:20px;margin:36px 0 6px">速い理由は 1 つ。<em class="k">あなたが直したものと EC-CUBE が、別々に更新される</em></h3>
@@ -65,7 +65,7 @@
     </div>
 
     <h3 id="versions" style="font-family:var(--f-display);font-size:20px;margin:44px 0 6px">バージョンを変えるのは、<em class="k">それぞれ 1 コマンド</em></h3>
-    <p class="sub">PHP・EC-CUBE・この環境（eccube-docker）は、別々に上げ下げできます。どれもデータ（受注・会員・商品・画像）はそのままです。</p>
+    <p class="sub">PHP・EC-CUBE・この環境（eccube-kit）は、別々に上げ下げできます。どれもデータ（受注・会員・商品・画像）はそのままです。</p>
     <div class="tablewrap">
       <table>
         <thead><tr><th>変えたいもの</th><th>やること</th><th>かかる時間</th></tr></thead>
@@ -81,7 +81,7 @@
             <td>数分<br><span style="color:var(--ink-mute);font-size:13px">失敗したら自動で元の版に戻る</span></td>
           </tr>
           <tr>
-            <td><strong>eccube-docker</strong><br><span style="color:var(--ink-mute);font-size:13px">v1.0.18 → v1.0.19 など</span></td>
+            <td><strong>eccube-kit</strong><br><span style="color:var(--ink-mute);font-size:13px">v1.0.18 → v1.0.19 など</span></td>
             <td><code>bin/self-update.sh</code></td>
             <td>1 分<br><span style="color:var(--ink-mute);font-size:13px">差分を git で見てから commit</span></td>
           </tr>
@@ -163,7 +163,7 @@
       <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg></span>
       <span><b>Issue を書く</b><span>不具合・要望・質問。GitHub で公開の相談</span></span>
     </a>
-    <a class="fab-item" href="mailto:info@a-zumi.net?subject=eccube-docker%20%E3%81%AE%E7%9B%B8%E8%AB%87">
+    <a class="fab-item" href="mailto:info@a-zumi.net?subject=eccube-kit%20%E3%81%AE%E7%9B%B8%E8%AB%87">
       <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></span>
       <span><b>メールで相談する</b><span>公開できない話、受託の構築・引っ越し</span></span>
     </a>

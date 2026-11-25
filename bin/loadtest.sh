@@ -149,7 +149,7 @@ mkdir -p "$out"
         echo "流し方:       ${profile}（山 ${rate} PV/秒、保つ ${duration}、上り ${ramp}、cart ${cart_ratio}、p95 ${p95}ms）"
     fi
     echo "k6:           ${K6_IMAGE%@*}"
-    echo "eccube-docker: $(cat VERSION 2>/dev/null || echo '?')（$(git rev-parse --short HEAD 2>/dev/null || echo 'git なし')）"
+    echo "eccube-kit: $(cat VERSION 2>/dev/null || echo '?')（$(git rev-parse --short HEAD 2>/dev/null || echo 'git なし')）"
     if [ "$local_target" = 1 ]; then
         echo "イメージ:     $(image_ref)"
         echo "APP_ENV:      $(env_get APP_ENV)"

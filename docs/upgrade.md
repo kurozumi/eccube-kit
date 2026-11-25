@@ -57,12 +57,12 @@ bin/plugin.sh list
 ```bash
 # 別ディレクトリに clone し、プロジェクト名とポートを分ける
 git clone <this-repo> eccube-staging && cd eccube-staging
-cp ../eccube-docker/.env .
+cp ../myshop/.env .
 #   .env を編集: COMPOSE_PROJECT_NAME=eccube-staging / HTTP_PORT=8090
 bin/init.sh
 
 # 本番のバックアップを流し込む（本物のデータで試すのが肝心）
-bin/restore.sh ../eccube-docker/backups/<日時>
+bin/restore.sh ../myshop/backups/<日時>
 
 # 本番と同じプラグインを app/Plugin へ置いてから実行
 bin/upgrade.sh ~4.4.0

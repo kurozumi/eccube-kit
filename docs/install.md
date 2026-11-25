@@ -55,7 +55,7 @@ mv eccube-docker-* myshop && cd myshop
 # 2) 自分のリポジトリとして初期化する
 git init -b main
 git add -A
-git commit -m "eccube-docker から開始"
+git commit -m "eccube-kit から開始"
 
 # 3) 自分の GitHub へ。**非公開で作る**（店のコードと設定が入るため）
 gh repo create myshop --private --source=. --push

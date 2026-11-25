@@ -112,7 +112,7 @@ uninstall が失敗したら、ファイルは消さずに止まります。
 ### 1. 定期的に取る
 
 ```
-0 4 * * * cd /path/to/eccube-docker && bin/backup.sh >> var/backup.log 2>&1
+0 4 * * * cd /path/to/myshop && bin/backup.sh >> var/backup.log 2>&1
 ```
 
 `bin/backup.sh` は DB を `mysqldump --single-transaction` で**無停止**で取り、
@@ -123,8 +123,8 @@ uninstall が失敗したら、ファイルは消さずに止まります。
 **同じディスクに置くだけでは、サーバーを失ったときに一緒に消えます。**
 
 ```
-0 4 * * * cd /path/to/eccube-docker && bin/backup.sh >> var/backup.log 2>&1
-15 4 * * * rclone sync /path/to/eccube-docker/backups remote:eccube-backups
+0 4 * * * cd /path/to/myshop && bin/backup.sh >> var/backup.log 2>&1
+15 4 * * * rclone sync /path/to/myshop/backups remote:eccube-backups
 ```
 
 保存先を直接外部にすることもできます。

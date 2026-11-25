@@ -23,7 +23,7 @@
 
 <header class="pagehead">
   <div class="wrap">
-    <p class="eyebrow">eccube-docker · __TAG__</p>
+    <p class="eyebrow">eccube-kit · __TAG__</p>
     <h1>はじめる・上げる</h1>
     <p class="lede">お店を作る、EC-CUBE を上げる、この環境を新しくする。どれを、どこで、どの順に打つかを図にしました。</p>
   </div>
@@ -43,7 +43,7 @@
       </div>
       <div class="term">
         <p class="tag">EC-CUBE を動かす台と道具</p>
-        <h3>eccube-docker（この環境）</h3>
+        <h3>EC-CUBE 運用キット（eccube-kit）</h3>
         <span class="ver">v1.0.19 のような番号（v 付き）</span>
         <p><code>bin/</code> のコマンドや、サーバーの組み立て。このページで配っているもの。</p>
       </div>
@@ -68,7 +68,7 @@
         <span class="go"><span class="letter">B</span><b>EC-CUBE のバージョンアップ</b></span>
       </a>
       <a class="pick" href="#flow-env">
-        <span class="when">eccube-docker の新しい版が出た<small>「v1.0.19」など、v の付く番号。月に 1 回くらい確かめる</small></span>
+        <span class="when">eccube-kit の新しい版が出た<small>「v1.0.19」など、v の付く番号。月に 1 回くらい確かめる</small></span>
         <span class="arrow" aria-hidden="true">→</span>
         <span class="go"><span class="letter">C</span><b>環境のアップデート</b></span>
       </a>
@@ -97,7 +97,7 @@
 <pre>curl -fsSL https://github.com/kurozumi/eccube-kit/releases/latest/download/eccube-docker.tar.gz | tar -xz
 mv eccube-docker-* myshop &amp;&amp; cd myshop</pre></li>
         <li><h4><span class="where pc">パソコン</span>自分の非公開リポジトリにする</h4>
-<pre>git init -b main &amp;&amp; git add -A &amp;&amp; git commit -m "eccube-docker から開始"
+<pre>git init -b main &amp;&amp; git add -A &amp;&amp; git commit -m "eccube-kit から開始"
 gh repo create myshop --private --source=. --push</pre></li>
         <li><h4><span class="where pc">パソコン</span>動かしてみる</h4>
 <pre>bin/init.sh --image=ghcr.io/kurozumi/eccube-kit/ec-cube:4.3-php8.3</pre>
@@ -151,7 +151,7 @@ bin/upgrade.sh ~4.3.0 --prod</pre>
       <div class="flow-head">
         <span class="letter">C</span>
         <h3>環境のアップデート</h3>
-        <p>例: eccube-docker v1.0.18 → v1.0.19。<strong>パソコンで取り込み、いつもの deploy でサーバーへ。</strong>サーバーで直接は取り込みません。</p>
+        <p>例: eccube-kit v1.0.18 → v1.0.19。<strong>パソコンで取り込み、いつもの deploy でサーバーへ。</strong>サーバーで直接は取り込みません。</p>
         <p>時間: 5 分ほど。お店はほとんど止まりません。</p>
         <div class="keep"><b>触らないもの:</b> EC-CUBE の版、お店のデータ、あなたが直したもの、<code>.env</code>。<br><b>新しくなるもの:</b> <code>bin/</code> のコマンド、サーバーの組み立て、文書。<br><b>止まったら:</b> 書き換えるファイルは先に全部控えてあり、途中で失敗すると自動で元に戻ります。</div>
       </div>
@@ -163,7 +163,7 @@ bin/upgrade.sh ~4.3.0 --prod</pre>
 <pre>bin/self-update.sh</pre>
 <p>配布元が変えたファイルだけを差し替えます。あなたが手を入れたファイルとぶつかるときは、上書きせずに止まって知らせます。</p></li>
         <li><h4><span class="where pc">パソコン</span>控えを送る</h4>
-<pre>git add -A &amp;&amp; git commit -m "eccube-docker v1.0.19" &amp;&amp; git push</pre></li>
+<pre>git add -A &amp;&amp; git commit -m "eccube-kit v1.0.19" &amp;&amp; git push</pre></li>
         <li><h4><span class="where srv">サーバー</span>いつもどおり反映する（パソコンから打つ）</h4>
 <pre>bin/deploy.sh --remote=user@サーバー:/srv/myshop</pre></li>
         <li><h4><span class="where eye">ブラウザ</span>お店を開いて確かめる</h4></li>
@@ -214,7 +214,7 @@ bin/upgrade.sh ~4.3.0 --prod</pre>
       <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg></span>
       <span><b>Issue を書く</b><span>不具合・要望・質問。GitHub で公開の相談</span></span>
     </a>
-    <a class="fab-item" href="mailto:info@a-zumi.net?subject=eccube-docker%20%E3%81%AE%E7%9B%B8%E8%AB%87">
+    <a class="fab-item" href="mailto:info@a-zumi.net?subject=eccube-kit%20%E3%81%AE%E7%9B%B8%E8%AB%87">
       <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></span>
       <span><b>メールで相談する</b><span>公開できない話、受託の構築・引っ越し</span></span>
     </a>
