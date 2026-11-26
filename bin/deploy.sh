@@ -136,13 +136,16 @@ if [ -n "$remote" ]; then
             fi
         fi
         # 何が出るか（向こうの記録にある最後の sha からの差分）
-        last="$(ssh "$host" "cd '${path}' 2>/dev/null && awk -F'\t' '\$5 == \"done\" { s = \$2 } END { if (s != \"\" && s != \"?\") print s }' var/deploy.log 2>/dev/null" 2>/dev/null | tail -1 || true)"
+        # 比べ先: 最後に成功した版と、そのあとに始めた deploy の版（失敗してもファイルは入れ替えていることがある）
+        sent="$(ssh "$host" "cat '${path}/var/deploy.log' 2>/dev/null" 2>/dev/null | deploy_sent_shas || true)"
+        last="${sent%%$'\n'*}"
         log "出るもの（${host}:${path}、${target}）:"
         deploy_preview "$last" "$sha"
         # **サーバーの管理画面が直したファイルを、手元の古い版で上書きしない。** サーバーに git が無いので、
         # backup.sh の「コミットされていない変更」の知らせは出ない。前回出した版と比べて、ここで見る
         log "サーバーの管理画面で直したファイルがないか見ます（app/template・html/user_data）..."
-        if conflicts="$(deploy_admin_conflicts "$host" "$path" "$last" "$sha")"; then
+        # shellcheck disable=SC2046  # sent は 1 行 1 つの sha
+        if conflicts="$(deploy_admin_conflicts "$host" "$path" $(printf '%s\n' "$sent" | sed '/^$/d'))"; then
             if [ -n "$conflicts" ]; then
                 log "  サーバーで直されていて、送ると手元の版で上書きされるファイルがあります:"
                 printf '%s\n' "$conflicts" | sed 's/^/    /'
@@ -188,9 +191,12 @@ if [ -n "$remote" ]; then
         #   - 退避（backups/<日時>-before-deploy/）に入るのが「送ったあと」のファイルになり、出す直前に戻せない
         #   - メンテナンス表示の前に、お客さんが新しいテンプレートと古い DB の組み合わせを見る
         # 変わっていないファイルは向こうのいまのものへハードリンクする（--link-dest。送るのは差分だけ）。
-        # **bin/ だけは先に置く。** 向こうの deploy.sh が古いと、置き場から入れ替えることを知らない
+        # **bin/ と docker/php/ だけは先に置く。** bin/ は、向こうの deploy.sh が古いと置き場から入れ替えることを
+        # 知らないから。docker/php/ はイメージの材料で、--rebuild の build はメンテナンスの前（入れ替えの前）に
+        # 走るため、置き場にあると古い Dockerfile で作ってしまう。どちらも置いただけでは動いているお店は変わらない
+        # （docker/php/ はどのコンテナにも mount していない）
         log "${host}:${path} へ送ります（git が追跡しているファイル。入れ替えは向こうで退避のあと）..."
-        git ls-files -z -- bin | rsync -az --from0 --files-from=- --backup --backup-dir="var/deploy-prev/${stamp}" ./ "${host}:${path}/" \
+        git ls-files -z -- bin docker/php | rsync -az --from0 --files-from=- --backup --backup-dir="var/deploy-prev/${stamp}" ./ "${host}:${path}/" \
             || die "送れませんでした。何も反映していません（向こうはまだ古いままです）"
         git ls-files -z | rsync -az --from0 --files-from=- --link-dest=../../.. ./ "${host}:${path}/var/deploy-incoming/${stamp}/" \
             || die "送れませんでした。お店のファイルはまだ入れ替えていません（向こうはまだ古いままです）"
