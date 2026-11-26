@@ -122,9 +122,9 @@ gh repo create myshop --private --source=. --push</pre>
       </div>
       <ol class="steps-v">
         <li><h4><span class="where pc">パソコン</span>あなたのリポジトリを取ってきて動かす</h4>
-<pre>gh repo clone myshop &amp;&amp; cd myshop
+<pre>gh repo clone &lt;持ち主&gt;/myshop &amp;&amp; cd myshop
 bin/init.sh --image=ghcr.io/kurozumi/eccube-kit/ec-cube:4.3-php8.3</pre>
-<p><code>--image=</code> は<strong>本番と同じもの</strong>にします（本番の <code>.env</code> の <code>ECCUBE_IMAGE</code>）。<code>.env</code> は git に入らないので、パソコンごとに新しく作られます。お店の中身は最初の空の状態で、本番のお客さんや注文は入っていません。</p></li>
+<p><code>&lt;持ち主&gt;</code> は、リポジトリを作った人の GitHub のユーザー名です（自分で作ったなら自分の名前）。省くと、打った人のアカウントの <code>myshop</code> を探すので、ほかの人が作ったリポジトリは取れません。2 人目の人は、先に持ち主から GitHub でリポジトリに招待してもらいます。<code>--image=</code> は<strong>本番と同じもの</strong>にします（本番の <code>.env</code> の <code>ECCUBE_IMAGE</code>）。<code>.env</code> は git に入らないので、パソコンごとに新しく作られます。お店の中身は最初の空の状態で、本番のお客さんや注文は入っていません。</p></li>
       </ol>
     </div>
   </div>
@@ -226,7 +226,7 @@ git push</pre>
         <tr><td><code>git push</code> を忘れた／パソコンの <code>main</code> が古い</td><td data-label="キットがすること">送らない。GitHub の <code>main</code> の先頭と<strong>まったく同じもの</strong>しか出せない</td></tr>
         <tr><td>何が出るか見ないまま出そうとした</td><td data-label="キットがすること">一覧を見せて、プロジェクト名を打つまで進まない。誰が・いつ・何を出したかをサーバーに記録する</td></tr>
         <tr><td>出している途中で失敗した</td><td data-label="キットがすること">メンテナンス表示のまま止まり、壊れた画面をお客さんに見せない。戻し方を表示する</td></tr>
-        <tr><td>管理画面で直したものがある（下）</td><td data-label="キットがすること">出す前の退避に入れて、パソコンへ取り込むように知らせる</td></tr>
+        <tr><td>本番の管理画面で直したものを、パソコンの古い版で上書きしそう（下）</td><td data-label="キットがすること">送らない。どのファイルかと、取り込み方を出す</td></tr>
       </table>
     </div>
 
@@ -246,7 +246,7 @@ git push</pre>
       <div class="flow-head">
         <span class="letter">D</span>
         <h3>本番の管理画面で直した分を、控えに入れる</h3>
-        <p><code>bin/deploy.sh</code> が「コミットされていない変更」があると知らせたら、次に出す前にこれをやります。</p>
+        <p>本番の管理画面で直したものがあると、<code>bin/deploy.sh</code> は<strong>何も送らずに止まり</strong>、どのファイルかを出します（送ると、パソコンの古い版で上書きして消してしまうため）。そうなったら、これをやってから出し直します。止まる前でも、管理画面で直したら早めに取り込んでおくと安心です。</p>
       </div>
       <ol class="steps-v">
         <li><h4><span class="where pc">パソコン</span>サーバーから取り込んで、控えを送る</h4>
@@ -269,7 +269,7 @@ git commit -m "管理画面で直した分を取り込む" &amp;&amp; git push</
         <span class="letter">E</span>
         <h3>上から順に試す</h3>
         <p>1 で直ればそこで終わりです。直らなければ 2、データベースまで戻すのは 3 です。</p>
-        <div class="keep"><b>出す直前の状態は、いつも取ってあります。</b><code>bin/deploy.sh</code> は始める前に、サーバーの <code>backups/&lt;日時&gt;-before-deploy/</code> へ退避しています。</div>
+        <div class="keep"><b>出す直前の状態は、いつも取ってあります。</b><code>bin/deploy.sh</code> は、メンテナンス表示を立ててからファイルを入れ替える前に、サーバーの <code>backups/&lt;日時&gt;-before-deploy/</code> へ退避しています。上書きした前のファイルは <code>var/deploy-prev/&lt;日時&gt;/</code> にも残ります。</div>
       </div>
       <ol class="steps-v">
         <li><h4><span class="where srv">サーバー</span>まず点検する</h4>
@@ -286,7 +286,8 @@ bin/deploy.sh --remote=shop:/srv/myshop</pre>
 <pre>ssh shop
 cd /srv/myshop
 bin/restore.sh backups/&lt;日時&gt;-before-deploy</pre>
-<p>データベースの形を変える変更を出したあとだけです。出す直前に取った退避から戻します。<strong>退避のあとに入った注文や、管理画面で変えたものは消えます。</strong>戻す前に、受注一覧でその時刻からの注文を確かめてください。</p></li>
+<p>データベースの形を変える変更を出したあとだけです。2 でコードを戻してから、<strong>おかしくなった deploy の直前</strong>の退避から戻します。2 で出し直したときにも新しい退避ができるので、<code>ls backups</code> で日時を見て、<strong>古いほう</strong>を選びます。</p>
+<p><strong>退避のあとに入った注文や、管理画面で変えたものは消えます。</strong>いちばん重い操作なので、戻す前に受注一覧でその時刻からの注文を確かめ、迷ったら打つ前に詳しい人に相談してください。</p></li>
       </ol>
     </div>
   </div>
