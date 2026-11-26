@@ -190,15 +190,15 @@ def main():
                   "- マージしたら、次のリリースで「本番に使ってよい」と案内する。",
         "series": "新しい系列を配るのは人の仕事です（`docs/upgrade.md`「マイナー」、`CLAUDE.md`）。\n"
                   "1. 上流の README で、その系列が対応する PHP を見る\n"
-                  "2. `build-image.yml` の matrix に足す（正式版が無いうちは `<系列>.x-dev`）。phpredis の版も決める\n"
+                  "2. `.github/build-matrix.json` に足す（正式版が無いうちは `<系列>.x-dev`）。phpredis の版も決める\n"
                   "3. `bin/lib/image.sh` の `image_php_for_series` / `image_php_versions_for_series` / `image_phpredis_for_series` を揃える\n"
-                  "4. `kit-e2e.yml` の matrix に足す\n"
+                  "4. `kit-e2e.yml` の matrix に足す（`image.sh` と一覧のずれは kit-e2e が落とす）\n"
                   "5. 配っているプラグインを全部移植する（目印による差し込み・本体の処理への割り込み・本体の副作用への対処の 3 つは黙って壊れる）\n"
                   "6. 文書・サイトの対応表を直す",
-        "phpreq": "- 新しく許された PHP は、`build-image.yml` の matrix と `image_php_versions_for_series` に足すか決める。\n"
+        "phpreq": "- 新しく許された PHP は、`.github/build-matrix.json` と `image_php_versions_for_series` に足すか決める。\n"
                   "- 外された PHP は、その系列で配るのを止めるか決める（止めるなら、使っている店への案内が先）。",
         "php": "- 系列ごとに、上流の composer.json がその版を許しているか・上流の CI で試されているかを見る。\n"
-               "- 配るなら matrix・`image_php_versions_for_series`・`image_php_eol`（保守期限）を足す。"
+               "- 配るなら `.github/build-matrix.json`・`image_php_versions_for_series`・`image_php_eol`（保守期限）を足す。"
                "**既定（`default: true`）は動かさない**（短いタグの店の PHP が変わる。いまは deploy が止めるが、知らせが要る）。",
     }
     titles = {"patch": "パッチ版", "pre": "プレリリース", "stable": "正式版", "series": "新しい系列",

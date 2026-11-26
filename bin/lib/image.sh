@@ -18,6 +18,16 @@
 
 # 設定値を解決する。シェルの環境変数を優先し、無ければ .env を見る。
 # （compose 自身は .env を読むが、スクリプト側は読まないため）
+# ボリュームへ戻したファイルの持ち主（uid:gid）。.env の PUID / PGID（entrypoint が www-data をそれに合わせる）、
+# 無ければ php:*-fpm の www-data（33）。数字でないものは使わない（chown に渡すので）
+app_owner() { # app_owner → "1000:1000" / "33:33"
+    local u g
+    u="$(env_get PUID)"; g="$(env_get PGID)"
+    case "$u" in ''|*[!0-9]*) u=33 ;; esac
+    case "$g" in ''|*[!0-9]*) g="$u" ;; esac
+    printf '%s:%s' "$u" "$g"
+}
+
 env_get() { # env_get KEY
     local key="$1" val
     # 間接展開で見る。**printenv は export されていない変数を見落とす**ので、

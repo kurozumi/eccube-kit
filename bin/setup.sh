@@ -282,7 +282,7 @@ EOS
         [ -n "$sport" ] || sport="localhost:$(env_get HTTP_PORT)"
         scode=000
         for _ in $(seq 1 60); do
-            scode="$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' -b "maintenance_token=${stoken}" "http://${sport}/" || echo 000)"
+            scode="$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' -b "maintenance_token=${stoken}" "http://${sport}/")" || scode=000
             [ "$scode" = 200 ] && break
             sleep 5
         done

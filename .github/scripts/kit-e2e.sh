@@ -70,12 +70,12 @@ pages() {
     base="$(compose_nginx_url)"
     admin="$(grep -E '^ECCUBE_ADMIN_ROUTE=' .env | tail -1 | cut -d= -f2-)"
     for p in / /products/list; do
-        code="$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' "${base}${p}" || echo 000)"
+        code="$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' "${base}${p}")" || code=000
         echo "  ${p} ${code}"
         [ "$code" = 200 ] || bad="${bad} ${p}(${code})"
     done
     for p in /cart /entry /contact /mypage/login /help/about "/${admin:-admin}/login"; do
-        code="$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' "${base}${p}" || echo 000)"
+        code="$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' "${base}${p}")" || code=000
         echo "  ${p} ${code}"
         case "$code" in 000|5*) bad="${bad} ${p}(${code})" ;; esac
     done

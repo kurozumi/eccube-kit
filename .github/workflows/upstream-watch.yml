@@ -47,9 +47,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           : > prev.json
-          body="$(gh issue list --label upstream-watch --state all --limit 1 --json body -q '.[0].body // ""' 2>/dev/null || true)"
-          b64="$(printf '%s\n' "$body" | sed -nE 's/.*upstream-watch-state: ([A-Za-z0-9+/=]+).*/\1/p' | head -1)"
-          if [ -n "$b64" ]; then printf '%s' "$b64" | base64 -d > prev.json; fi
+          # **読めなかったのを「初回」と取り違えない。** 初回はパッチ版を知らせず焼き直しもしないので、その日に出たパッチが
+          # 二度と拾われなくなる。問い合わせが失敗したら止める（空にするのは、Issue が 1 つも無いと分かったときだけ）
+          list="$(gh issue list --label upstream-watch --state all --limit 1 --json number,body)" || { echo "::error::前回の状態を読めませんでした"; exit 1; }
+          num="$(jq -r '.[0].number // ""' <<<"$list")"
+          if [ -n "$num" ]; then
+            b64="$(jq -r '.[0].body' <<<"$list" | sed -nE 's/.*upstream-watch-state: ([A-Za-z0-9+/=]+).*/\1/p' | head -1)"
+            [ -n "$b64" ] || { echo "::error::#${num} に状態の印がありません（本文を書き換えた？）"; exit 1; }
+            printf '%s' "$b64" | base64 -d > prev.json
+          fi
+          echo "STATE_ISSUE=${num}" >> "$GITHUB_ENV"
           echo "前回の状態: $(wc -c < prev.json) バイト"
 
       - name: 見る
@@ -87,9 +94,14 @@ jobs:
             s="$(jq -r .series <<<"$row")"; latest="$(jq -r .latest <<<"$row")"
             git fetch -q origin main && git switch -q --detach origin/main
             if .github/scripts/upstream_stable_pr.sh "$s" "$latest" > pr.log 2>&1; then
-              gh workflow run kit-e2e.yml --ref "auto/eccube-${s}-stable" || true
-              gh workflow run config-check.yml --ref "auto/eccube-${s}-stable" 2>/dev/null || true
-              notes="${notes}- ${s} を正式版にする PR を作りました（ブランチ auto/eccube-${s}-stable）。kit-e2e をそのブランチへ流しています。"$'\n'
+              notes="${notes}- ${s} を正式版にする PR を作りました（ブランチ auto/eccube-${s}-stable）。"$'\n'
+              for wf in kit-e2e.yml config-check.yml; do
+                if gh workflow run "$wf" --ref "auto/eccube-${s}-stable"; then
+                  notes="${notes}  - ${wf} をそのブランチへ流しました"$'\n'
+                else
+                  notes="${notes}  - **${wf} を流せませんでした。** 手で: \`gh workflow run ${wf} --ref auto/eccube-${s}-stable\`"$'\n'
+                fi
+              done
             elif grep -q '^branch=' pr.log; then
               notes="${notes}- **${s} の PR を作れませんでした**（Settings → Actions → General の「Allow GitHub Actions to create and approve pull requests」が切ってあると作れません）。ブランチ auto/eccube-${s}-stable は push してあるので、そこから PR を作ってください。"$'\n'
             else
@@ -113,6 +125,11 @@ jobs:
             fi
             num="$(gh issue create --title "$title" --label upstream-watch --body-file body.md | sed -nE 's#.*/issues/([0-9]+)$#\1#p')"
             if [ "$CHANGED" != true ]; then gh issue close "$num" --comment "知らせることが無いので閉じます。"; fi
+          elif ! cmp -s <(jq -S . prev.json) <(jq -S . out/state.json); then
+            # 知らせることは無いが、状態は変わった（前の日に読めなかった系列の PHP の制約を、今日初めて読めた など）。
+            # 保存しないと、その系列の次の変化を「初めて読んだ」と見て知らせない。前の Issue の印だけ差し替える（新しく開かない）
+            gh issue view "$STATE_ISSUE" --json body -q .body | sed -E "s|<!-- upstream-watch-state: [A-Za-z0-9+/=]+ -->|${marker}|" > body.md
+            grep -qF "$marker" body.md && gh issue edit "$STATE_ISSUE" --body-file body.md
           fi
           # 読めなかったときの Issue は 1 つだけ。読めたら閉じる
           gh label create upstream-watch-error --color FBCA04 --description "上流の情報を読めなかった（upstream-watch.yml）" 2>/dev/null || true

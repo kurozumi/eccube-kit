@@ -901,7 +901,9 @@ PHP
     # （restore は途中で落ちてメンテナンス表示のまま止まる）。v1.0.25 までの init.sh は書いていなかった
     if [ "$(uname -s)" = Linux ] && [ -z "$(env_get PUID)" ] && [ "$(id -u)" != 0 ]; then
         echo "[doctor] 注意: .env に PUID / PGID がありません（Linux）。git pull と bin/restore.sh が、管理画面が書いたファイルを上書きできません"
-        echo "         直すには .env に PUID=$(id -u) と PGID=$(id -g) を書いて docker compose up -d（docs/install.md「本番が Linux なら」）"
+        echo "         直すには .env に PUID=$(id -u) と PGID=$(id -g) を書き、いまある書き込み先の持ち主を自分に戻してから docker compose up -d"
+        echo "           sudo chown -R $(id -u):$(id -g) app/template html/user_data"
+        echo "         （docs/install.md「本番が Linux なら」）"
         warn=1
     fi
     echo "[doctor] キャッシュを組み立て直します"
@@ -928,7 +930,7 @@ PHP
     # init.sh は admin-<乱数> にするので、決め打ちでは init で作った店の全部で「404 ← 異常」を出していた（kit-e2e で発覚）
     admin_route="$(env_get ECCUBE_ADMIN_ROUTE)"
     for path in / /products/list /entry "/${admin_route:-admin}/login"; do
-        code="$(curl -s -o /dev/null -w '%{http_code}' "${base}${path}" || echo 000)"
+        code="$(curl -s -o /dev/null -w '%{http_code}' "${base}${path}")" || code=000
         case "$code" in
             200|302) echo "[doctor] ${code} ${path}" ;;
             *)       echo "[doctor] ${code} ${path}  ← 異常"; page_ng=1; ng=1 ;;
