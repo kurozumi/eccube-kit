@@ -112,7 +112,7 @@ deploy_record() { # deploy_record <sha> <mode> <by> <状態: start|done|failed[ 
 
 # 最後に成功した sha（無ければ空）
 deploy_last_sha() {
-    awk -F'\t' '$5 == "done" { s = $2 } END { if (s != "" && s != "?") print s }' var/deploy.log 2>/dev/null || true
+    awk -F'\t' '$5 ~ /^done/ { s = $2 } END { if (s != "" && s != "?") print s }' var/deploy.log 2>/dev/null || true
 }
 
 # この人（記録用）。git の email があればそれ、無ければ OS のユーザー
@@ -120,4 +120,90 @@ deploy_whoami() {
     local u
     u="$(git config user.email 2>/dev/null || true)"
     printf '%s@%s' "${u:-${SUDO_USER:-${USER:-?}}}" "$(hostname -s 2>/dev/null || hostname)"
+}
+
+# 手元から送る（push モード）とき、**サーバーの管理画面が直したファイルを上書きしないか**を見る。
+#   deploy_admin_conflicts <host> <path> [<出したことのある sha> ...]
+#   標準出力: 上書きしてしまうファイル（1 行 1 つ）。終わりの値: 0 = 見られた、1 = 見られなかった
+#
+# 管理画面（ページ管理・ブロック管理・メール設定の本文・CSS / JS 管理）は app/template と html/user_data に書く。
+# サーバーに git は無いので、サーバーで直したかどうかは「これまでに出した版」と比べて決める。
+#   - サーバー ≠ いま送るもの              … 送ると上書きされる
+#   - かつ サーバーがどの出した版とも違う  … サーバーで変わった ＝ 管理画面で直した
+#     （出した版に無いファイル・出した版が分からないときは、上の 1 つだけで決める。安全側）
+# 出した版は 1 つではない。最後に成功した版に加えて、そのあとに始めた deploy の版も入れる（deploy_sent_shas）。
+# 失敗した deploy もファイルは入れ替えていることがあり（途中で止まれば新旧が混ざる）、それを管理画面の直しと
+# 取り違えると、直した版も戻す版も出せなくなる。
+# 比べる「いま送るもの」は手元の追跡しているファイルの**いまの中身**（送るのと同じ。DEPLOY_UNREVIEWED では
+# コミットしていない変更も送る）。サーバーにしか無いファイルは送っても触らないので見ない（--existing）。
+deploy_admin_conflicts() {
+    local host="$1" path="$2" tmp d dirs="" rc=0 i=0 n base bdirs f hit has
+    shift 2
+    tmp="$(mktemp -d)" || return 1
+    for d in app/template html/user_data; do
+        [ -n "$(git ls-files -- "$d" 2>/dev/null | head -1)" ] && dirs="$dirs $d"
+    done
+    [ -n "$dirs" ] || { rm -rf "$tmp"; return 0; }
+    mkdir -p "$tmp/head"
+    # shellcheck disable=SC2086  # dirs は空白区切りの固定の名前
+    git ls-files -z -- $dirs | rsync -a --from0 --files-from=- ./ "$tmp/head/" 2>"$tmp/err" \
+        || { sed 's/^/    /' "$tmp/err" >&2; rm -rf "$tmp"; return 1; }
+    # 出した版を 1 つずつ取り出す。取り出せない版は比べ先にしない（比べ先が減るだけで、安全側）
+    for base in "$@"; do
+        git cat-file -e "${base}^{commit}" 2>/dev/null || continue
+        # shellcheck disable=SC2086
+        git ls-tree -r --name-only "$base" -- $dirs > "$tmp/list.$i" 2>/dev/null || continue
+        bdirs=""
+        for d in $dirs; do grep -q "^${d}/" "$tmp/list.$i" && bdirs="$bdirs $d"; done
+        [ -n "$bdirs" ] || continue
+        mkdir -p "$tmp/base.$i"
+        # shellcheck disable=SC2086
+        if git archive -o "$tmp/base.$i.tar" "$base" -- $bdirs 2>/dev/null && tar -xf "$tmp/base.$i.tar" -C "$tmp/base.$i" 2>/dev/null; then
+            i=$((i + 1))
+        else
+            rm -rf "$tmp/base.$i" "$tmp/list.$i"
+        fi
+    done
+    n="$i"
+    for d in $dirs; do
+        # 無いのは初回（まだ何も無い）。ssh が届かなかったのとは分ける
+        has="$(ssh "$host" "if [ -d '${path}/${d}' ]; then echo yes; else echo no; fi" 2>>"$tmp/err")" || { rc=1; break; }
+        case "$has" in
+            no) continue ;;
+            yes) ;;
+            *) echo "${host}:${path}/${d} があるか分かりませんでした" >> "$tmp/err"; rc=1; break ;;
+        esac
+        # サーバー ≠ いま送るもの
+        rsync -rnc --existing --out-format='%n' "${host}:${path}/${d}/" "$tmp/head/${d}/" > "$tmp/a" 2>>"$tmp/err" || { rc=1; break; }
+        # サーバー ≠ 出した版（版ごと）
+        i=0
+        while [ "$i" -lt "$n" ]; do
+            mkdir -p "$tmp/base.$i/${d}"
+            rsync -rnc --existing --out-format='%n' "${host}:${path}/${d}/" "$tmp/base.$i/${d}/" > "$tmp/b.$i" 2>>"$tmp/err" || { rc=1; break 2; }
+            i=$((i + 1))
+        done
+        while IFS= read -r f; do
+            case "$f" in */|'') continue ;; esac
+            # どれか 1 つの出した版と同じなら、出したもの
+            hit=0; i=0
+            while [ "$i" -lt "$n" ]; do
+                if grep -qxF "${d}/${f}" "$tmp/list.$i" && ! grep -qxF "$f" "$tmp/b.$i"; then hit=1; break; fi
+                i=$((i + 1))
+            done
+            [ "$hit" = 1 ] || printf '%s/%s\n' "$d" "$f"
+        done < "$tmp/a"
+    done
+    [ "$rc" = 0 ] || sed 's/^/    /' "$tmp/err" >&2
+    rm -rf "$tmp"
+    return "$rc"
+}
+
+# 比べ先になる「出した版」: 最後に成功した版と、そのあとに始めた（失敗・途中の）deploy の版。
+# 標準入力に var/deploy.log。1 行目が最後に成功した版（無ければ空行）、2 行目からがそのあとの版
+deploy_sent_shas() {
+    awk -F'\t' '
+        $2 == "" || $2 == "?" { next }
+        $5 ~ /^done/ { last = $2; n = 0; delete seen; next }   # "done UNREVIEWED" も成功
+        !($2 in seen) && $2 != last { seen[$2] = 1; after[n++] = $2 }
+        END { print last; for (i = 0; i < n; i++) print after[i] }'
 }
