@@ -116,6 +116,20 @@ if [ -z "$pname" ]; then
     if grep -qE '^COMPOSE_PROJECT_NAME=' .env; then set_env COMPOSE_PROJECT_NAME "$pname"; else printf '\nCOMPOSE_PROJECT_NAME=%s\n' "$pname" >> .env; fi
     echo "[init] プロジェクト名: ${pname}"
 fi
+# Linux では、コンテナの www-data をこのユーザーに合わせる（PUID / PGID。docs/install.md）。**書かないと、管理画面が
+# 書いたファイル（html/user_data・app/template）が www-data の持ち物になり、git pull も bin/restore.sh も上書きできない。**
+# restore は途中で落ち、戻す処理も同じ所で落ちて、メンテナンス表示のまま止まる（kit-e2e で 6 組とも踏んだ）。
+# 文書で「書く」と案内していたが、init は書いていなかった。root で打ったときは書かない（www-data を root にしない）。
+# macOS（Docker Desktop）は所有者を透過するので要らない。
+if [ "$(uname -s)" = Linux ] && [ -z "$(env_val PUID)" ] && [ "$(id -u)" != 0 ]; then
+    printf '
+# このサーバーのユーザーに www-data を合わせる（bin/init.sh が書いた。docs/install.md）
+PUID=%s
+PGID=%s
+' "$(id -u)" "$(id -g)" >> .env
+    echo "[init] PUID=$(id -u) / PGID=$(id -g) を .env に書きました（Linux。コンテナの www-data をこのユーザーに合わせます）"
+fi
+
 db_ready=0
 for v in "${pname}_db_data" "${pname}_pg_data"; do
     docker volume inspect "$v" >/dev/null 2>&1 && db_ready=1

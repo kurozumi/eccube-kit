@@ -172,7 +172,8 @@ DoctrineMigrations / config / Plugin）と `html/user_data`（独自 CSS/JS）�
   ここに書く。ro だとブロックと新規ページの保存が 500、メール本文は保存エラー（本体は
   `dumpFile` を捕まえていない）。開発では override が rw にしていたので気づかなかった。
   コードの側（`app/Customize` 等）は ro のまま。
-- **Linux の本番は `.env` に `PUID` / `PGID`。** entrypoint が www-data の uid を揃える。
+- **Linux の本番は `.env` に `PUID` / `PGID`。** `bin/init.sh` が Linux で自動で書く（root で打ったときは書かない。v1.0.25 までは
+  書かず、文書の案内だけだった）。書いていない Linux の店は `doctor` が「注意」を出す。entrypoint が www-data の uid を揃える。
   揃えないと、管理画面が書いたファイルを `git pull` が上書きできず、ホストが置いた
   ファイルを管理画面が書けない（欄が空に見える）。macOS は透過なので不要。
 - **ディスクに残る状態は、git か backup のどちらかに必ず入る。** 管理画面は DB
@@ -423,6 +424,12 @@ DoctrineMigrations / config / Plugin）と `html/user_data`（独自 CSS/JS）�
   検出・エンティティ拡張の反映確認・キャッシュの組み立て直し・主要ページの疎通確認まで
   やる。ページが落ちているときだけ直近の CRITICAL を出す。
 
+- **キット自体は `kit-e2e.yml` で、系列（4.2・4.3・4.4）× DB（MariaDB・PostgreSQL）の 6 組を通して試す**
+  （`.github/scripts/kit-e2e.sh`。init → ページ → `security.sh check` → backup → DB を変えて restore → 同じ系列で upgrade →
+  ページ → doctor）。キットの動きに関わるファイルを変える PR と、毎週月曜（全部を焼き直した朝のあと）に流れる。**自動で
+  取り込む（自動マージする）ための土台**で、ここが通らない変更は通さない。手元で流すときは使い捨ての worktree の中で
+  （`.env` があると止まる）。最初に流して、`doctor` が管理画面を `/admin/login` と決め打ちし、`init.sh` で作った店（`admin-<乱数>`）の
+  全部で「404 ← 異常」を出していたのが見つかった。
 - **テストは `bin/test.sh` から実行する**。素の `vendor/bin/phpunit` だとコンテナの
   `APP_ENV=prod` が勝って prod カーネルが起動し、`WebTestCase` 系が
   「framework.test config is not set to true」で全部落ちる（`bin/test.sh` が

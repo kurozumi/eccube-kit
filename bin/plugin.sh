@@ -897,6 +897,13 @@ PHP
         ;;
     esac
 
+    # Linux で PUID が無いと、管理画面が書いたファイルが www-data の持ち物になり、git pull と restore が上書きできない
+    # （restore は途中で落ちてメンテナンス表示のまま止まる）。v1.0.25 までの init.sh は書いていなかった
+    if [ "$(uname -s)" = Linux ] && [ -z "$(env_get PUID)" ] && [ "$(id -u)" != 0 ]; then
+        echo "[doctor] 注意: .env に PUID / PGID がありません（Linux）。git pull と bin/restore.sh が、管理画面が書いたファイルを上書きできません"
+        echo "         直すには .env に PUID=$(id -u) と PGID=$(id -g) を書いて docker compose up -d（docs/install.md「本番が Linux なら」）"
+        warn=1
+    fi
     echo "[doctor] キャッシュを組み立て直します"
     clear_runtime_cache
     # **ここでは止まらない。** 点検の途中なので、失敗も所見として拾って先へ進む
@@ -917,7 +924,10 @@ PHP
     fi
     echo "[doctor] 疎通を確かめる先: ${base}"
     page_ng=0
-    for path in / /products/list /entry /admin/login; do
+    # 管理画面の URL は .env の ECCUBE_ADMIN_ROUTE（compose がアプリに渡す）。**/admin と決め打ちしない。**
+    # init.sh は admin-<乱数> にするので、決め打ちでは init で作った店の全部で「404 ← 異常」を出していた（kit-e2e で発覚）
+    admin_route="$(env_get ECCUBE_ADMIN_ROUTE)"
+    for path in / /products/list /entry "/${admin_route:-admin}/login"; do
         code="$(curl -s -o /dev/null -w '%{http_code}' "${base}${path}" || echo 000)"
         case "$code" in
             200|302) echo "[doctor] ${code} ${path}" ;;
