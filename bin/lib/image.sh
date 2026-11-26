@@ -18,6 +18,16 @@
 
 # 設定値を解決する。シェルの環境変数を優先し、無ければ .env を見る。
 # （compose 自身は .env を読むが、スクリプト側は読まないため）
+# ボリュームへ戻したファイルの持ち主（uid:gid）。.env の PUID / PGID（entrypoint が www-data をそれに合わせる）、
+# 無ければ php:*-fpm の www-data（33）。数字でないものは使わない（chown に渡すので）
+app_owner() { # app_owner → "1000:1000" / "33:33"
+    local u g
+    u="$(env_get PUID)"; g="$(env_get PGID)"
+    case "$u" in ''|*[!0-9]*) u=33 ;; esac
+    case "$g" in ''|*[!0-9]*) g="$u" ;; esac
+    printf '%s:%s' "$u" "$g"
+}
+
 env_get() { # env_get KEY
     local key="$1" val
     # 間接展開で見る。**printenv は export されていない変数を見落とす**ので、
@@ -83,7 +93,7 @@ image_series() { # image_series <制約>
 # 系列ごとの phpredis。**両立しないので系列で決まる**（docker/php/Dockerfile 参照）。
 #   4.2 / 4.3（Symfony Cache 6.4） … 6.0.x（6.1+ は hSet のシグネチャ変更で衝突）
 #   4.4（Symfony Cache 7.4）       … 6.1 以上（symfony/cache が ext-redis <6.1 を conflict）
-# **.github/workflows/build-image.yml の matrix と揃えること。**
+# **.github/build-matrix.json（焼く組の一覧）と揃えること。** kit-e2e がずれを落とす。
 image_phpredis_for_series() { # image_phpredis_for_series <系列>
     case "$1" in
         4.4) printf '6.3.0' ;;
@@ -93,7 +103,7 @@ image_phpredis_for_series() { # image_phpredis_for_series <系列>
 
 # 系列ごとの**既定の** PHP（`-php` 無しの短いタグが指すもの）。4.4 は土台が Symfony 7.4
 # なので 8.2 以上が要る。他の PHP は配布タグの `-php8.x` で選ぶ（image_php_versions_for_series）。
-# **.github/workflows/build-image.yml の matrix と揃えること。**
+# **.github/build-matrix.json（焼く組の一覧）と揃えること。** kit-e2e がずれを落とす。
 #
 # **8.2 は 2026-12-31 でセキュリティサポートが切れる。** 4.3 は対応の上限の 8.3（2027-12-31 まで）を
 # 既定にした。4.2 は上流の対応が 8.1 までで、8.2 より上を配っていないので 8.2 のまま
@@ -107,7 +117,7 @@ image_php_for_series() { # image_php_for_series <系列>
 
 # 系列ごとに配っている PHP（空白区切り）。上流の対応一覧に従う（4.2 の 8.2 は一覧の外だが
 # composer の制約には入り、v1.0.0 から配っている）。知らない系列は空を返す。
-# **.github/workflows/build-image.yml の matrix と揃えること。**
+# **.github/build-matrix.json（焼く組の一覧）と揃えること。** kit-e2e がずれを落とす。
 image_php_versions_for_series() { # image_php_versions_for_series <系列>
     case "$1" in
         4.2) printf '8.1 8.2' ;;

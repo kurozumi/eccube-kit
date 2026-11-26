@@ -164,7 +164,9 @@ Symfony Cache と両立しないバージョンがあり、間違えると起動
 2 か所にあり、**必ず揃えること**:
 
 - `bin/lib/image.sh` の `image_php_for_series` / `image_php_versions_for_series` / `image_phpredis_for_series`
-- `.github/workflows/build-image.yml` の `setup` ジョブ
+- `.github/build-matrix.json`（焼く組の一覧。build-image の `setup` ジョブが読む）
+
+ずれは kit-e2e が最初のステップで落とす。
 
 ### 3. リリースノートに書くこと
 

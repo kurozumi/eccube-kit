@@ -574,7 +574,10 @@ site_code() {
     case "$port" in *:) port="${port}8080" ;; esac
     # X-Forwarded-Proto: https を付ける。付けないと ECCUBE_FORCE_SSL の店は https への転送（301/302）を返し、
     # 画面を組み立てずに「開いた」ことになる
-    curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' -b "maintenance_token=${token:-}" "http://${port}${1}" || echo 000
+    # 繋がらないと curl は 000 を書いてから失敗で終わる。`|| echo 000` だと 000000 になり、「000 か 500 番台」の判定をすり抜ける
+    local c
+    c="$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' -b "maintenance_token=${token:-}" "http://${port}${1}")" || c=000
+    printf '%s' "$c"
 }
 
 # 上げたあとに、トップと商品一覧のほかにも開くかを確かめるページ。**上げる前に開いていたものだけ**を確かめる

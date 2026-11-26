@@ -322,14 +322,15 @@ fi
 if has upload.tar.gz; then
     echo "[restore] アップロード画像を復元しています..."
     # 書庫の先頭は upload/ なので、/ に展開すると /upload（＝ボリューム）に重なる。
-    # www-data は uid 33（php:*-fpm 系の既定）。alpine には無いので数字で指定する。
-    rd upload.tar.gz | vol_rw eccube_upload /upload sh -c 'tar -C / -xzf - && chown -R 33:33 /upload'
+    # 持ち主は www-data の uid（.env の PUID。無ければ php:*-fpm の既定 33）。alpine には無いので数字で指定する。
+    # 33 に決め打ちすると、PUID のある Linux の店で、戻した app/PluginData にアプリが書けない（再起動でも直らない）
+    rd upload.tar.gz | vol_rw eccube_upload /upload sh -c 'tar -C / -xzf - && chown -R "$0" /upload' "$(app_owner)"
 fi
 
 if has plugindata.tar.gz; then
     echo "[restore] プラグインが置いたファイル（app/PluginData）を復元しています..."
     # 本体のボリュームの中。いまのものを消してから戻す（控えに無いファイルを残さない）
-    rd plugindata.tar.gz | vol_rw eccube_app /app sh -c 'mkdir -p /app/app && rm -rf /app/app/PluginData && tar -C /app/app -xzf - && chown -R 33:33 /app/app/PluginData'
+    rd plugindata.tar.gz | vol_rw eccube_app /app sh -c 'mkdir -p /app/app && rm -rf /app/app/PluginData && tar -C /app/app -xzf - && chown -R "$0" /app/app/PluginData' "$(app_owner)"
     need_reload=1
 fi
 

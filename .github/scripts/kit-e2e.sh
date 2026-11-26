@@ -24,6 +24,31 @@ if [ -e .env ] && [ "${GITHUB_ACTIONS:-}" != true ]; then
 fi
 
 # ---------------------------------------------------------------- 準備
+step "一覧と bin/lib/image.sh が揃っているか（${series}）"
+# 焼く組は .github/build-matrix.json、スクリプトが選ぶ PHP と phpredis は bin/lib/image.sh。ずれると、
+# 焼いていないタグ（4.4-php8.6）を引きにいく・違う phpredis で焼く、が黙って起きる。upstream-watch の PR は一覧しか変えない
+# shellcheck source=../../bin/lib/image.sh
+. bin/lib/image.sh
+python3 - "$series" "$(image_php_versions_for_series "$series")" "$(image_php_for_series "$series")" "$(image_phpredis_for_series "$series")" <<'PY2'
+import json, sys
+s, phps, default, redis = sys.argv[1], sys.argv[2].split(), sys.argv[3], sys.argv[4]
+rows = [r for r in json.load(open('.github/build-matrix.json', encoding='utf-8')) if r['series'] == s]
+bad = []
+if sorted(r['php'] for r in rows) != sorted(phps):
+    bad.append(f"PHP: 一覧 {sorted(r['php'] for r in rows)} / image.sh {sorted(phps)}")
+d = [r['php'] for r in rows if r['default']]
+if d != [default]:
+    bad.append(f"既定の PHP: 一覧 {d} / image.sh {default}")
+if {r['phpredis'] for r in rows} != {redis}:
+    bad.append(f"phpredis: 一覧 {sorted({r['phpredis'] for r in rows})} / image.sh {redis}")
+if len({r['eccube'] for r in rows}) != 1:
+    bad.append(f"制約が組ごとに違う: {sorted({r['eccube'] for r in rows})}")
+for b in bad:
+    print(f"::error::{s}: {b}")
+sys.exit(1 if bad else 0)
+PY2
+endstep
+
 step "準備（${series} / ${engine}）"
 python3 - "$engine" "$proj" <<'PY'
 import re, sys
@@ -45,12 +70,12 @@ pages() {
     base="$(compose_nginx_url)"
     admin="$(grep -E '^ECCUBE_ADMIN_ROUTE=' .env | tail -1 | cut -d= -f2-)"
     for p in / /products/list; do
-        code="$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' "${base}${p}" || echo 000)"
+        code="$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' "${base}${p}")" || code=000
         echo "  ${p} ${code}"
         [ "$code" = 200 ] || bad="${bad} ${p}(${code})"
     done
     for p in /cart /entry /contact /mypage/login /help/about "/${admin:-admin}/login"; do
-        code="$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' "${base}${p}" || echo 000)"
+        code="$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' "${base}${p}")" || code=000
         echo "  ${p} ${code}"
         case "$code" in 000|5*) bad="${bad} ${p}(${code})" ;; esac
     done
@@ -103,10 +128,12 @@ pages
 endstep
 
 # ---------------------------------------------------------------- upgrade（同じ系列）
-case "$series" in
-    4.4) to="4.4.x-dev" ;;    # 4.4 はまだ正式版が無い（~4.4.0 は解決できない）
-    *)   to="~${series}.0" ;;
-esac
+# 上げる先は .github/build-matrix.json の制約（正式版が無い系列は 4.4.x-dev、あれば ~4.4.0）。
+# ここに系列ごとの版を書かない: 正式版が出て matrix を変える PR（upstream-watch）が、ここまで直さずに済むように
+# （pipefail の下でパイプの読み手を先に終わらせない。変数に取ってから切る）
+m="$(grep -o "\"series\":\"${series}\",\"eccube\":\"[^\"]*\"" .github/build-matrix.json || true)"
+to="${m%%$'\n'*}"; to="${to##*\"eccube\":\"}"; to="${to%\"}"
+[ -n "$to" ] || fail ".github/build-matrix.json に ${series} がありません"
 step "upgrade ${to}（同じ系列。本体の作り直し・migration・ページの確認）"
 # yes は upgrade.sh が終わると SIGPIPE で落ちる。pipefail がそれを失敗にしないよう、yes の側の失敗は握る
 { yes y || true; } | bin/upgrade.sh "$to"

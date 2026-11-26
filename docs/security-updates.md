@@ -10,6 +10,8 @@ nginx・PHP・DB・Redis などに重大な脆弱性が出たとき、**その�
 04:00 JST  security-scan（毎日） 全イメージを Trivy で調べ、保守期限と Docker の設定も見る → 要対応なら Issue
 04:30 JST  ec-cube-watch（毎日） EC-CUBE 公式の脆弱性リスト・セキュリティ勧告・開発者向けガイドが増えたら Issue
            ec-cube-watch（毎月 1 日）サイト運営者向けのガイドラインを人が見るよう Issue で知らせる
+05:00 JST  upstream-watch（毎日） EC-CUBE の新しいパッチ・正式版・系列、新しい PHP → 焼き直し・PR・Issue
+焼き終わり kit-e2e                 焼いたイメージで init〜upgrade〜doctor を 6 組通す。main で落ちたら Issue
 PR のたび  config-check            compose / docker/ を変える PR が決まりを破っていたら落とす
 05:00 JST  Dependabot（毎日）    版を固定して書いてあるイメージの版上げ PR
            人（必要なら Claude）  Issue と PR を読み、うちの構成で効くかを調べ、直す PR を作る
@@ -40,7 +42,7 @@ PR のたび  config-check            compose / docker/ を変える PR が決�
 
 - 系列そのものの乗り換え（保守が終わった nginx 1.27 → 1.30、MariaDB 10.6 → 10.11 など）
 - 版を固定して書いてあるもの（`caddy:2.11.4-alpine`・`cloudflared:2026.8.3`）
-- 配布イメージの PHP の版の一覧（`build-image.yml` の matrix と `bin/lib/image.sh`）
+- 配布イメージの PHP の版の一覧（`.github/build-matrix.json` と `bin/lib/image.sh`。新しい PHP・系列は upstream-watch が Issue で知らせる）
 
 これらは Dependabot か人（手元の Claude Code）が PR にし、人がマージしてリリースする。
 リリースしたものは、利用者が `bin/self-update.sh` → `bin/deploy.sh` で受け取る。
@@ -136,6 +138,32 @@ Trivy が見るのはイメージの中のパッケージで、**EC-CUBE 本体�
 **サイト運営者向けの「[セキュリティ対策ガイドライン](https://www.ec-cube.net/security/guideline/)」は機械では読めない**
 （ブラウザの確認がかかっている。すり抜けない）。毎月 1 日に、ラベル `ec-cube-guideline` の Issue で「開いて見る」よう知らせる。
 変わっていたら、ページのスクリーンショットか本文を手元の Claude Code に渡して `docs/security.md` に反映する。
+
+## 上流の新しい版（upstream-watch.yml）
+
+EC-CUBE と PHP の新しい版に、キットを追いつかせる。毎日、`.github/build-matrix.json`（焼く組の一覧）と上流
+（Packagist・EC-CUBE/ec-cube のブランチと各系列の `composer.json`・endoflife.date の PHP）を比べる。
+
+| 出たもの | 自動でやること | 人がやること |
+|---|---|---|
+| 配っている系列のパッチ版（4.3.2） | その系列を当日焼き直す（build-image の refresh）。焼き終わりで kit-e2e が流れる | 上流のリリースノートを読み、セキュリティの修正なら利用者に知らせる |
+| 開発版で配っている系列の正式版（4.4.0） | 一覧を `~4.4.0` に変える PR を作り、そのブランチに kit-e2e と config-check を流す | PR に文書とサイトの直しを足してマージ。次のリリースで案内 |
+| プレリリース（4.4.0-RC1） | 知らせるだけ | なし |
+| 新しい系列（4.5） | Issue に手順を並べる | 移植（PHP・phpredis・一覧・`image.sh`・プラグイン全数・文書） |
+| 系列が許す PHP の変化・新しい PHP（8.6） | Issue で知らせる | 配るかを決める。**既定の PHP は動かさない**（短いタグの店の PHP が変わる） |
+
+**店の EC-CUBE と PHP は勝手に上がらない。** 焼き直したイメージに新しいパッチが入っても、店の本体（`eccube_app`
+ボリューム）は店の人が `bin/upgrade.sh` を打つまでそのまま。PHP のマイナー版が変わるイメージは、deploy / publish が
+引いたところで止める（`image_php_drift_guard`）。系列をまたぐ upgrade は点検と `--rehearsed` が要る。
+
+- 前回の状態は、ラベル `upstream-watch` のいちばん新しい Issue の本文に隠して持つ。読めなかった元は引き継ぎ、
+  ラベル `upstream-watch-error` の Issue を 1 つだけ開く
+- **正式版の PR を作るには、Settings → Actions → General の「Allow GitHub Actions to create and approve pull requests」を
+  オンにする。** オフだとブランチ（`auto/eccube-<系列>-stable`）だけ push して、Issue に「PR を作って」と書く
+- 一覧をワークフローの外（`.github/build-matrix.json`）に置いているのは、GITHUB_TOKEN が `.github/workflows/` を push できないため
+
+**kit-e2e が main で落ちたら**、ラベル `kit-e2e` の Issue が開く。焼き終わりで落ちたなら、配っているイメージで店の操作が
+通らないということなので、まず追跡タグを前のリリースへ戻す（build-image の `restore_floating_from`）。
 
 ## 利用者の側
 

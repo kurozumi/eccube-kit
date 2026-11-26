@@ -1002,10 +1002,10 @@ cmd_cutover() {
     "${dc[@]}" stop ec-cube worker >/dev/null 2>&1 || "${dc[@]}" stop ec-cube >/dev/null
     bin/restore.sh --rollback --db-only "$out" >/dev/null || die "DB を流し込めませんでした（控え: backups/*-before-cutover）"
     log "画像とプラグインが置いたファイルを入れます..."
-    docker run --rm -i -v "${proj}_eccube_upload:/upload" alpine:3 sh -c 'tar -C / -xzf - && chown -R 33:33 /upload' < "$out/upload.tar.gz" \
+    docker run --rm -i -v "${proj}_eccube_upload:/upload" alpine:3 sh -c 'tar -C / -xzf - && chown -R "$0" /upload' "$(app_owner)" < "$out/upload.tar.gz" \
         || die "画像を入れられませんでした"
     if [ -f "$out/plugindata.tar.gz" ]; then
-        docker run --rm -i -v "${proj}_eccube_app:/app" alpine:3 sh -c 'mkdir -p /app/app && rm -rf /app/app/PluginData && tar -C /app/app -xzf - && chown -R 33:33 /app/app/PluginData' < "$out/plugindata.tar.gz" \
+        docker run --rm -i -v "${proj}_eccube_app:/app" alpine:3 sh -c 'mkdir -p /app/app && rm -rf /app/app/PluginData && tar -C /app/app -xzf - && chown -R "$0" /app/app/PluginData' "$(app_owner)" < "$out/plugindata.tar.gz" \
             || die "プラグインが置いたファイルを入れられませんでした"
     fi
     tar -xzf "$out/admin-files.tar.gz" || die "ページ（app/template/user_data）を入れられませんでした"
