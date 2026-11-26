@@ -15,6 +15,9 @@ set -euo pipefail
 case "${1:-}" in -h|--help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;; esac
 cd "$(dirname "$0")/.."
 
+# shellcheck source=bin/lib/deploy-guard.sh
+. bin/lib/deploy-guard.sh
+
 log() { echo "[pull-admin] $*"; }
 die() { echo "[pull-admin] エラー: $*" >&2; exit 1; }
 
@@ -41,10 +44,38 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 fi
 
 log "${host} の ${path} から app/template と html/user_data を取り込みます..."
+# 向こうに出した版（deploy.sh / bootstrap-server.sh の記録）。取り込んだあと、**向こうが出した版のままのファイルは
+# 手元へ戻す。** 手元で直してまだ出していないファイルは、向こうでは古い版のまま。それを取り込むと手元の直しが
+# 消え、言われたとおり commit すると取り消しになる（deploy.sh が止まったときの案内どおりに打つと、そうなっていた）
+sent="$(ssh "$host" "cat '${path}/var/deploy.log' 2>/dev/null" 2>/dev/null | deploy_sent_shas || true)"
 # tar で 1 本にして流す。ファイル単位の scp は遅く、途中で切れたときに半端が残る。
 ssh "$host" "cd '${path}' && tar -czf - app/template html/user_data" | tar -xzf -
 
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    kept=""
+    bases="$(printf '%s\n' "$sent" | sed '/^$/d')"
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        now="$(git hash-object -- "$f" 2>/dev/null || true)"
+        for b in $bases; do
+            if [ -n "$now" ] && [ "$(git rev-parse -q --verify "${b}:${f}" 2>/dev/null || true)" = "$now" ]; then
+                git checkout -q HEAD -- "$f"
+                kept="${kept}${f}
+"
+                break
+            fi
+        done
+    done <<EOF_CHANGED
+$(git diff --name-only -- app/template html/user_data 2>/dev/null || true)
+EOF_CHANGED
+    if [ -n "$kept" ]; then
+        log "手元のほうが新しいので取り込まなかったもの（向こうはまだ前に出した版のまま。次の deploy で届きます）:"
+        printf '%s' "$kept" | sed 's/^/    /'
+    fi
+    if [ -z "$bases" ] && [ -n "$(git diff --name-only -- app/template html/user_data 2>/dev/null || true)" ]; then
+        log "注意: 向こうに出した版の記録が無いので、手元で直してまだ出していないものも、向こうの古い版で上書きしています。"
+        log "  git diff で確かめ、手元の直しを残すファイルは git checkout HEAD -- <ファイル> で戻してください。"
+    fi
     changed="$(git status --porcelain -- app/template html/user_data 2>/dev/null || true)"
     if [ -z "$changed" ]; then
         log "手元と同じでした。取り込むものはありません。"

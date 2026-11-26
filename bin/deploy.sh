@@ -149,7 +149,10 @@ if [ -n "$remote" ]; then
             if [ -n "$conflicts" ]; then
                 log "  サーバーで直されていて、送ると手元の版で上書きされるファイルがあります:"
                 printf '%s\n' "$conflicts" | sed 's/^/    /'
-                [ -n "$last" ] || log "  （前回出した版がサーバーの記録に無いので、手元と違うものを全部挙げています）"
+                if [ -z "${sent//[[:space:]]/}" ]; then
+                    log "  （出した版がサーバーの記録に無いので、手元と違うものを全部挙げています。手元で直してまだ出していない"
+                    log "    ものも入っています。取り込んだら git diff で確かめ、手元の直しを残すファイルは git checkout HEAD -- <ファイル>）"
+                fi
                 if [ "$check" = 1 ]; then
                     log "  このままでは送れません。出す前に手元へ取り込んで、控えに入れてください:"
                     log "    bin/pull-admin-files.sh ${host}:${path}"
