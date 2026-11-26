@@ -53,6 +53,11 @@ PR のたび  config-check            compose / docker/ を変える PR が決�
   （通知はその日だけ来る）。要対応が無くなると閉じる。
 - 要対応にするもの: 保守が終わった版・60 日以内に終わる版・修正版のある CRITICAL / HIGH・点検できなかったイメージ。
 - 配布イメージ（ec-cube）は OS のパッケージだけを見る。`vendor` は EC-CUBE 本体の lock で、こちらでは触らない。
+- **リポジトリの Security タブ（Code scanning）は別口。** `build-image.yml` が焼くたびに Trivy の結果（OS と `vendor`）を
+  送るので、`vendor/composer/installed.json` の警告（twig・symfony・composer など）が並ぶ。これも本体の lock なので、
+  **理由を付けて「Won't fix」で閉じる**（2026-11-26 に 103 件を閉じた）。送るのは止めない。閉じたあとも新しい CVE だけは
+  新しい警告として挙がるので、本体側の状態は見え続ける。本体の修正版が出れば upstream-watch が焼き直しと知らせを出し、
+  店へは `upgrade.sh` で入る。`vendor` 以外（OS のパッケージなど）の警告は閉じずに、上の点検の Issue と同じに扱う。
 - **あえて配っている保守終了の版**（例: PHP 8.1。4.2 / 4.3 の対応一覧にあるため）は
   `.github/security-accept.json` の `accept` に理由と見直し期限を書いて外す。期限を過ぎると、また挙がる。
 - **上流のイメージがまだ直していない CVE は、`vuln` に番号を並べて受け入れられる。** イメージ（タグを除く）・
