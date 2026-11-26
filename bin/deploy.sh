@@ -66,7 +66,7 @@ cd "$(dirname "$0")/.."
 log() { echo "[deploy] $*"; }
 die() { echo "[deploy] エラー: $*" >&2; exit 1; }
 
-do_pull=1; do_backup=1; do_rebuild=0; remote=""; mode=auto; check=0; sent_sha=""; sent_by=""; sent_note=""
+do_pull=1; do_backup=1; do_rebuild=0; remote=""; mode=auto; check=0; sent_sha=""; sent_by=""; sent_note=""; incoming=""
 for a in "$@"; do
     case "$a" in
         --no-pull)   do_pull=0 ;;
@@ -78,6 +78,7 @@ for a in "$@"; do
         --sha=*)     sent_sha="${a#--sha=}" ;;   # 内部用: push モードで手元が送った sha
         --by=*)      sent_by="${a#--by=}" ;;     # 内部用: push モードで送った人
         --note=*)    sent_note=" ${a#--note=}" ;; # 内部用: 記録に添える印（UNREVIEWED）
+        --incoming=*) incoming="${a#--incoming=}" ;; # 内部用: push モードで送ったファイルの置き場（退避のあとで入れ替える）
         --remote=*)  remote="${a#--remote=}" ;;
         --remote)    die "--remote=host:/path の形で指定してください" ;;
         -h|--help)   grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -103,7 +104,8 @@ if [ -n "$remote" ]; then
     # **判定できないものを「本番ではない」と扱わない**（guard.sh と同じ考え）。
     probe="$(ssh "$host" "cd '${path}' 2>/dev/null && . bin/lib/guard.sh && guard_is_prod_stack; echo \"rc=\$?\"; guard_project_name" 2>/dev/null || true)"
     rprod="$(printf '%s\n' "$probe" | sed -n 's/^rc=//p' | tail -1)"
-    rproj="$(printf '%s\n' "$probe" | grep -v '^rc=' | tail -1)"
+    # 名前が取れない（向こうにまだ .env が無い など）と grep が 1 を返す。set -e と pipefail の下で黙って終わらないように握る
+    rproj="$(printf '%s\n' "$probe" | grep -v '^rc=' | tail -1 || true)"
     case "$rprod" in 0) target=prod ;; 1) target=dev ;; *) target=unknown ;; esac
     if [ "$mode" = push ]; then
         git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "手元が git のリポジトリではありません（push モードは git が追跡しているファイルを送ります）"
@@ -137,6 +139,42 @@ if [ -n "$remote" ]; then
         last="$(ssh "$host" "cd '${path}' 2>/dev/null && awk -F'\t' '\$5 == \"done\" { s = \$2 } END { if (s != \"\" && s != \"?\") print s }' var/deploy.log 2>/dev/null" 2>/dev/null | tail -1 || true)"
         log "出るもの（${host}:${path}、${target}）:"
         deploy_preview "$last" "$sha"
+        # **サーバーの管理画面が直したファイルを、手元の古い版で上書きしない。** サーバーに git が無いので、
+        # backup.sh の「コミットされていない変更」の知らせは出ない。前回出した版と比べて、ここで見る
+        log "サーバーの管理画面で直したファイルがないか見ます（app/template・html/user_data）..."
+        if conflicts="$(deploy_admin_conflicts "$host" "$path" "$last" "$sha")"; then
+            if [ -n "$conflicts" ]; then
+                log "  サーバーで直されていて、送ると手元の版で上書きされるファイルがあります:"
+                printf '%s\n' "$conflicts" | sed 's/^/    /'
+                [ -n "$last" ] || log "  （前回出した版がサーバーの記録に無いので、手元と違うものを全部挙げています）"
+                if [ "$check" = 1 ]; then
+                    log "  このままでは送れません。出す前に手元へ取り込んで、控えに入れてください:"
+                    log "    bin/pull-admin-files.sh ${host}:${path}"
+                    log "    git add app/template html/user_data && git commit -m '管理画面で直した分を取り込む' && git push"
+                elif [ "$target" = dev ]; then
+                    log "  注意: 開発/検証サーバーなので、このまま上書きします（前の版は向こうの var/deploy-prev/ に残ります）"
+                elif [ -n "$rproj" ] && [ "${DEPLOY_OVERWRITE_ADMIN:-}" = "$rproj" ]; then
+                    log "  DEPLOY_OVERWRITE_ADMIN を確認しました。上書きします（前の版は向こうの var/deploy-prev/ に残ります）"
+                else
+                    die "送ると、管理画面で直したものが消えます。何も送っていません。先に手元へ取り込んで、控えに入れてから出してください:
+         bin/pull-admin-files.sh ${host}:${path}
+         git add app/template html/user_data && git commit -m '管理画面で直した分を取り込む' && git push
+         bin/deploy.sh --remote=${host}:${path}
+       取り込まずに上書きするなら DEPLOY_OVERWRITE_ADMIN=${rproj:-<プロジェクト名>}（前の版は var/deploy-prev/ に残ります）"
+                fi
+            else
+                log "  ✓ ありません"
+            fi
+        elif [ "$target" = dev ]; then
+            log "  注意: 確かめられませんでした（開発/検証サーバーなので進めます）"
+        elif [ -n "$rproj" ] && [ "${DEPLOY_OVERWRITE_ADMIN:-}" = "$rproj" ]; then
+            log "  確かめられませんでしたが、DEPLOY_OVERWRITE_ADMIN を確認したので進めます"
+        elif [ "$check" = 1 ]; then
+            log "  確かめられませんでした（上のエラー）"
+        else
+            die "サーバーの管理画面で直したファイルを確かめられませんでした（上のエラー）。何も送っていません。
+       確かめずに送るなら DEPLOY_OVERWRITE_ADMIN=${rproj:-<プロジェクト名>}"
+        fi
         if [ "$check" = 1 ]; then log "--check なので、ここまで。何も送っていません。"; exit 0; fi
         # 本番の確認は**送る前**に取る。送ってから断られると、向こうのファイルだけ新しい状態が残るため
         if [ "$target" != dev ]; then
@@ -144,11 +182,19 @@ if [ -n "$remote" ]; then
             envs="CONFIRM_DEPLOY='${rproj:-$(basename "$path")}' "
         fi
         stamp="$(date +%Y%m%d-%H%M%S)"
-        log "${host}:${path} へ送ります（git が追跡しているファイル。上書きされる分は向こうの var/deploy-prev/${stamp}/ に残す）..."
-        ssh "$host" "mkdir -p '${path}'" || die "${host} に入れません（ssh の設定を確認）"
-        git ls-files -z | rsync -az --from0 --files-from=- --backup --backup-dir="var/deploy-prev/${stamp}" ./ "${host}:${path}/" \
+        ssh "$host" "mkdir -p '${path}/var/deploy-incoming'" || die "${host} に入れません（ssh の設定を確認）"
+        # **お店のファイルは、まず置き場（var/deploy-incoming/<日時>/）へ送る。** 入れ替えるのは向こうの deploy.sh が
+        # メンテナンス表示を立てて退避を取ったあと。直接送ると、
+        #   - 退避（backups/<日時>-before-deploy/）に入るのが「送ったあと」のファイルになり、出す直前に戻せない
+        #   - メンテナンス表示の前に、お客さんが新しいテンプレートと古い DB の組み合わせを見る
+        # 変わっていないファイルは向こうのいまのものへハードリンクする（--link-dest。送るのは差分だけ）。
+        # **bin/ だけは先に置く。** 向こうの deploy.sh が古いと、置き場から入れ替えることを知らない
+        log "${host}:${path} へ送ります（git が追跡しているファイル。入れ替えは向こうで退避のあと）..."
+        git ls-files -z -- bin | rsync -az --from0 --files-from=- --backup --backup-dir="var/deploy-prev/${stamp}" ./ "${host}:${path}/" \
             || die "送れませんでした。何も反映していません（向こうはまだ古いままです）"
-        args="$args --no-pull --sha=${sha} --by=$(deploy_whoami)"
+        git ls-files -z | rsync -az --from0 --files-from=- --link-dest=../../.. ./ "${host}:${path}/var/deploy-incoming/${stamp}/" \
+            || die "送れませんでした。お店のファイルはまだ入れ替えていません（向こうはまだ古いままです）"
+        args="$args --no-pull --sha=${sha} --by=$(deploy_whoami) --incoming=var/deploy-incoming/${stamp}"
         [ -n "$sent_note" ] && args="$args --note=${sent_note# }"
     elif [ "$do_pull" = 0 ]; then
         args="$args --no-pull"
@@ -310,6 +356,10 @@ on_fail() {
     if [ -n "${before:-}" ] && [ "${before:-}" != "${after:-}" ]; then
         echo "         直前のコードに戻すなら: git checkout ${before} && bin/deploy.sh --no-pull" >&2
     fi
+    if [ -n "${prev_dir:-}" ]; then
+        echo "         直前のファイルに戻すなら（あなたのパソコンで）: git revert で取り消して push し、もう一度 bin/deploy.sh --remote=…" >&2
+        echo "         （上書きした前のファイルは ${prev_dir}/ にもあります）" >&2
+    fi
     if [ -n "${backup_dir:-}" ]; then
         echo "         DB も始める前に戻すなら: bin/restore.sh ${backup_dir}" >&2
         if [ "${drained:-1}" = 1 ]; then
@@ -362,6 +412,20 @@ if [ "$do_backup" = 1 ]; then
     log "退避先: ${backup_dir}"
 fi
 trap on_fail ERR
+
+# ── 2b. 手元から送ったファイルを入れ替える（push モード） ──
+# 退避を取ったあと、メンテナンス表示の中で入れ替える。上書きする前のファイルは var/deploy-prev/<日時>/ に残す
+if [ -n "$incoming" ]; then
+    case "$incoming" in var/deploy-incoming/[0-9]*) ;; *) die "--incoming の置き場が変です: ${incoming}" ;; esac
+    [ -d "$incoming" ] || die "送ったファイルの置き場（${incoming}）がありません"
+    prev_dir="var/deploy-prev/${incoming##*/}"
+    log "送ったファイルを入れ替えます（上書きする前のものは ${prev_dir}/）..."
+    command -v rsync >/dev/null 2>&1 || die "サーバーに rsync がありません"
+    rsync -a --backup --backup-dir="$PWD/${prev_dir}" "${incoming}/" ./
+    rm -rf "$incoming"
+fi
+# 前の deploy が途中で止めて残した置き場は、もう使わない
+find var/deploy-incoming -mindepth 1 -maxdepth 1 -type d -mmin +60 -exec rm -rf {} + 2>/dev/null || true
 
 # ── 3. pull ──
 before="$(git rev-parse --short HEAD 2>/dev/null || echo '')"

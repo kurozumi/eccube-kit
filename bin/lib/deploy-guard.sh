@@ -121,3 +121,51 @@ deploy_whoami() {
     u="$(git config user.email 2>/dev/null || true)"
     printf '%s@%s' "${u:-${SUDO_USER:-${USER:-?}}}" "$(hostname -s 2>/dev/null || hostname)"
 }
+
+# 手元から送る（push モード）とき、**サーバーの管理画面が直したファイルを上書きしないか**を見る。
+#   deploy_admin_conflicts <host> <path> <前回出した sha|""> <いま出す sha>
+#   標準出力: 上書きしてしまうファイル（1 行 1 つ）。終わりの値: 0 = 見られた、1 = 見られなかった
+#
+# 管理画面（ページ管理・ブロック管理・メール設定の本文・CSS / JS 管理）は app/template と html/user_data に書く。
+# サーバーに git は無いので、サーバーで直したかどうかは「前回出した版（var/deploy.log の最後の sha）」と比べて決める。
+#   - サーバー ≠ いま出す版        … 送ると上書きされる
+#   - かつ サーバー ≠ 前回出した版  … 前回からサーバーで変わった ＝ 管理画面で直した
+#     （前回出した版に無いファイル・前回が分からないときは、上の 1 つだけで決める。安全側）
+# サーバー ＝ 前回出した版 で、いま出す版だけが違うのは、手元で直したものを出す普通の形なので挙げない。
+# 比べるのは中身（rsync -c の空打ち）。いま出す版にあるファイルだけを見る（--existing。サーバーにしか無い
+# ファイルは送っても触らない）。
+deploy_admin_conflicts() {
+    local host="$1" path="$2" last="$3" head="$4" tmp d dirs="" rc=0
+    tmp="$(mktemp -d)" || return 1
+    for d in app/template html/user_data; do
+        [ -n "$(git ls-tree -r --name-only "$head" -- "$d" 2>/dev/null | head -1)" ] && dirs="$dirs $d"
+    done
+    [ -n "$dirs" ] || { rm -rf "$tmp"; return 0; }
+    mkdir -p "$tmp/head" "$tmp/last"
+    # shellcheck disable=SC2086  # dirs は空白区切りの固定の名前
+    git archive "$head" -- $dirs | tar -x -C "$tmp/head" || { rm -rf "$tmp"; return 1; }
+    if [ -n "$last" ] && git cat-file -e "${last}^{commit}" 2>/dev/null; then
+        git ls-tree -r --name-only "$last" -- app/template html/user_data > "$tmp/last.list" 2>/dev/null || true
+        # shellcheck disable=SC2086
+        [ -s "$tmp/last.list" ] && { git archive "$last" -- $dirs 2>/dev/null | tar -x -C "$tmp/last" 2>/dev/null || true; }
+    else
+        : > "$tmp/last.list"
+    fi
+    for d in $dirs; do
+        ssh "$host" "test -d '${path}/${d}'" 2>/dev/null || continue   # 初回（まだ何も無い）
+        # サーバー ≠ いま出す版
+        rsync -rnc --existing --out-format='%n' "${host}:${path}/${d}/" "$tmp/head/${d}/" > "$tmp/a" 2>"$tmp/err" || { rc=1; break; }
+        # サーバー ≠ 前回出した版
+        mkdir -p "$tmp/last/${d}"
+        rsync -rnc --existing --out-format='%n' "${host}:${path}/${d}/" "$tmp/last/${d}/" > "$tmp/b" 2>>"$tmp/err" || { rc=1; break; }
+        while IFS= read -r f; do
+            case "$f" in */|'') continue ;; esac
+            if ! grep -qxF "${d}/${f}" "$tmp/last.list" || grep -qxF "$f" "$tmp/b"; then
+                printf '%s/%s\n' "$d" "$f"
+            fi
+        done < "$tmp/a"
+    done
+    [ "$rc" = 0 ] || sed 's/^/    /' "$tmp/err" >&2
+    rm -rf "$tmp"
+    return "$rc"
+}
