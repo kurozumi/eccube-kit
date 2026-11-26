@@ -101,11 +101,11 @@
     },
     {
       "image": "cloudflare/cloudflared",
-      "package": "golang.org/x/net",
+      "package": "libzstd1",
       "ids": [
-        "CVE-2026-78661"
+        "CVE-2026-124851"
       ],
-      "reason": "golang.org/x/net/html の、細工した HTML を食わせると遅くなる不具合（DoS）。お客さんから届く HTML を読み解く使い方はしていない。外に面した本体なので見直しは短く。上流の次の版を待つ（最新の版でも直っていない）",
+      "reason": "土台（distroless の Debian 13）に入っているだけで、cloudflared は静的リンクの 1 本（動的セクションが無い）なので読み込まない。修正版（1.5.7+dfsg-1+deb13u1）は Debian に出ていて、上流のイメージの作り直しを待つ（2026.11.2 でも 1.5.7+dfsg-1）",
       "review_by": "2026-12-21"
     },
     {
