@@ -1,0 +1,125 @@
+# 上流（EC-CUBE・PHP）の新しい版を見張り、キットを追いつかせる（.github/scripts/upstream_watch.py）。
+#
+#   パッチ版（4.3.2）          → その系列のイメージを当日焼き直す（build-image の refresh）。焼き終わると kit-e2e が流れる
+#   正式版の初登場（4.4.0）    → matrix を ~4.4.0 に変える PR を作り、そのブランチに kit-e2e と config-check を流す
+#   新しい系列・PHP・プレリリース・系列が許す PHP の変化 → Issue で知らせる（移植は人）
+#
+# **店の EC-CUBE と PHP は勝手に上げない。** 焼き直したイメージに入るのは、その系列の新しいパッチだけで、
+# 店の本体（eccube_app ボリューム）は `bin/upgrade.sh` を打つまで変わらない。PHP のマイナー版の変化は
+# deploy / publish が止める（image_php_drift_guard）。**マージとリリースは人。**
+#
+# 前回の状態は、ラベル `upstream-watch` のいちばん新しい Issue（閉じたものを含む）の本文に隠して持つ。
+# 初回は「見張りを始めた」Issue を開く（知らせることが無ければすぐ閉じる）。
+# 読めなかった元は前回を引き継ぎ、ラベル `upstream-watch-error` の Issue を 1 つだけ開く（読めたら閉じる）。
+name: upstream-watch
+
+on:
+  schedule:
+    - cron: "0 20 * * *"   # 毎日 05:00 JST（ec-cube-watch のあと、build-image の翌朝の分より前）
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/upstream-watch.yml"
+      - ".github/scripts/upstream_watch.py"
+      - ".github/scripts/upstream_stable_pr.sh"
+
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write        # 正式版の PR のブランチを push する
+      pull-requests: write
+      issues: write
+      actions: write         # build-image / kit-e2e / config-check を投げる
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 前回の状態を読む
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          : > prev.json
+          body="$(gh issue list --label upstream-watch --state all --limit 1 --json body -q '.[0].body // ""' 2>/dev/null || true)"
+          b64="$(printf '%s\n' "$body" | sed -nE 's/.*upstream-watch-state: ([A-Za-z0-9+/=]+).*/\1/p' | head -1)"
+          if [ -n "$b64" ]; then printf '%s' "$b64" | base64 -d > prev.json; fi
+          echo "前回の状態: $(wc -c < prev.json) バイト"
+
+      - name: 見る
+        id: watch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/scripts/upstream_watch.py .github/build-matrix.json prev.json out | tee -a "$GITHUB_OUTPUT"
+          cat out/report.md; cat out/actions.json
+
+      - name: 焼き直す・PR を作る・知らせる
+        # PR では何も動かさない（結果はログで見る）
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANGED: ${{ steps.watch.outputs.changed }}
+          ERRORS: ${{ steps.watch.outputs.errors }}
+          FIRST: ${{ steps.watch.outputs.first }}
+        run: |
+          gh label create upstream-watch --color 0E8A16 --description "上流（EC-CUBE・PHP）に新しい版が出た（upstream-watch.yml）" 2>/dev/null || true
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          notes=""
+
+          # パッチ版: その系列を焼き直す（終わると kit-e2e が workflow_run で流れる）
+          for s in $(jq -r '.build[]' out/actions.json); do
+            if gh workflow run build-image.yml -f series="$s" -f refresh=true; then
+              notes="${notes}- ${s} の焼き直しを始めました（Actions → build-image）。終わると kit-e2e が新しいイメージで通して試します。"$'\n'
+            else
+              notes="${notes}- **${s} の焼き直しを始められませんでした。** Actions → build-image を series=${s}・refresh で手で流してください。"$'\n'
+            fi
+          done
+
+          # 正式版: PR を作って、そのブランチに試験を流す
+          for row in $(jq -c '.stable_pr[]' out/actions.json); do
+            s="$(jq -r .series <<<"$row")"; latest="$(jq -r .latest <<<"$row")"
+            git fetch -q origin main && git switch -q --detach origin/main
+            if .github/scripts/upstream_stable_pr.sh "$s" "$latest" > pr.log 2>&1; then
+              gh workflow run kit-e2e.yml --ref "auto/eccube-${s}-stable" || true
+              gh workflow run config-check.yml --ref "auto/eccube-${s}-stable" 2>/dev/null || true
+              notes="${notes}- ${s} を正式版にする PR を作りました（ブランチ auto/eccube-${s}-stable）。kit-e2e をそのブランチへ流しています。"$'\n'
+            elif grep -q '^branch=' pr.log; then
+              notes="${notes}- **${s} の PR を作れませんでした**（Settings → Actions → General の「Allow GitHub Actions to create and approve pull requests」が切ってあると作れません）。ブランチ auto/eccube-${s}-stable は push してあるので、そこから PR を作ってください。"$'\n'
+            else
+              notes="${notes}- **${s} の PR を作れませんでした。** ログ: ${run_url}"$'\n'
+            fi
+            cat pr.log
+          done
+
+          marker="<!-- upstream-watch-state: $(base64 -w0 out/state.json) -->"
+          if [ "$CHANGED" = true ] || [ "$FIRST" = true ]; then
+            {
+              [ "$FIRST" = true ] && { echo "上流（EC-CUBE・PHP）の見張りを始めました。次からは、ここから変わったものだけを知らせます。"; echo; }
+              cat out/report.md; echo
+              [ -n "$notes" ] && { echo "## やったこと"; echo; printf '%s' "$notes"; echo; }
+              echo "（${run_url}）"; echo "$marker"
+            } > body.md
+            if [ "$CHANGED" = true ]; then
+              title="上流に新しい版が出ました（$(TZ=Asia/Tokyo date +%F)）"
+            else
+              title="上流（EC-CUBE・PHP）の見張りを始めました"
+            fi
+            num="$(gh issue create --title "$title" --label upstream-watch --body-file body.md | sed -nE 's#.*/issues/([0-9]+)$#\1#p')"
+            if [ "$CHANGED" != true ]; then gh issue close "$num" --comment "知らせることが無いので閉じます。"; fi
+          fi
+          # 読めなかったときの Issue は 1 つだけ。読めたら閉じる
+          gh label create upstream-watch-error --color FBCA04 --description "上流の情報を読めなかった（upstream-watch.yml）" 2>/dev/null || true
+          err="$(gh issue list --label upstream-watch-error --state open --json number -q '.[0].number')"
+          if [ "$ERRORS" = true ] && [ -z "$err" ]; then
+            { sed -n '/^## 読めなかったもの/,/^前回の状態/p' out/report.md; echo; echo "（${run_url}）"; } > err.md
+            gh issue create --title "上流（EC-CUBE・PHP）の情報を読めませんでした" --label upstream-watch-error --body-file err.md
+          elif [ "$ERRORS" != true ] && [ -n "$err" ]; then
+            gh issue close "$err" --comment "読めるようになったので閉じます（${run_url}）。"
+          fi

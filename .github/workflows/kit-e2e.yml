@@ -5,8 +5,11 @@
 #
 # いつ流すか:
 #   - キットの動きに関わるファイルを変える PR
-#   - 毎週月曜 06:00 JST（build-image が全部を焼き直した朝のあと。焼き直したイメージで通るか）
-#   - 手動
+#   - build-image が焼き終わったとき（毎日の焼き直し・月曜の全部・リリース・upstream-watch が投げたパッチ版の焼き直し）。
+#     **配っているイメージで、店の操作が通るか**を見る
+#   - 手動（upstream-watch は、自分で作った PR のブランチにこれを投げる。GITHUB_TOKEN の PR には pull_request が走らない）
+# main で落ちたら、ラベル `kit-e2e` の Issue を 1 つ開く（GitHub の失敗のメールは、見落とすと誰も気づかない）。
+# 次に main で通ったら閉じる。
 # 落ちたら、コンテナの状態とログを成果物に残す（使い捨ての環境なので、秘密は入っていても使い捨て）。
 name: kit-e2e
 
@@ -18,10 +21,12 @@ on:
       - "compose*.yaml"
       - "app/config/eccube/**"
       - ".env.example"
+      - ".github/build-matrix.json"
       - ".github/scripts/kit-e2e.sh"
       - ".github/workflows/kit-e2e.yml"
-  schedule:
-    - cron: "0 21 * * 0"   # 月曜 06:00 JST
+  workflow_run:
+    workflows: [build-image]
+    types: [completed]
   workflow_dispatch:
 
 concurrency:
@@ -33,6 +38,10 @@ permissions:
 
 jobs:
   e2e:
+    # 焼き終わりで流すのは、PR 以外の焼きが成功したときだけ（PR の焼きは配らない。落ちた焼きは配られていない）
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event != 'pull_request')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -64,3 +73,49 @@ jobs:
           name: e2e-${{ matrix.series }}-${{ matrix.engine }}
           path: e2e-logs
           retention-days: 7
+
+  # main で落ちたら Issue。PR とほかのブランチ（upstream-watch の PR のブランチなど）は、その場の結果で見る
+  report:
+    needs: e2e
+    if: always() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && needs.e2e.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULT: ${{ needs.e2e.result }}
+          WHY: ${{ github.event_name == 'workflow_run' && format('build-image の焼き終わり（{0}）', github.event.workflow_run.html_url) || github.event_name }}
+        run: |
+          gh label create kit-e2e --color B60205 --description "キットの通し試験が main で落ちた（kit-e2e.yml）" 2>/dev/null || true
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          open="$(gh issue list --label kit-e2e --state open --json number -q '.[0].number')"
+          if [ "$RESULT" = success ]; then
+            [ -z "$open" ] || gh issue close "$open" --comment "main で 6 組とも通りました（${run_url}）。閉じます。"
+            exit 0
+          fi
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body "まだ落ちています（${run_url}、きっかけ: ${WHY}）。"
+            exit 0
+          fi
+          cat > body.md <<EOF
+          キットの通し試験（kit-e2e）が **main で落ちました**。きっかけ: ${WHY}
+
+          結果: ${run_url}（落ちた組の成果物に、コンテナの状態とログがあります）
+
+          ## 何が起きているか
+
+          焼き終わりで落ちたなら、**いま配っているイメージ（追跡タグ）で、店の操作（init・backup・restore・upgrade・doctor）のどれかが通らない**ということです。
+          新しいイメージを引いた店で同じことが起きる見込みがあります。
+
+          ## やること
+
+          1. 落ちた組とステップを見る（系列・DB・どのステップか）
+          2. 上流のパッチ・PHP・Debian のどれが変わったかを見る（build-image のログの版）
+          3. 店に影響が出るなら、追跡タグを前のリリースへ戻す（build-image を \`restore_floating_from=<前のリリース>\` で手動実行）。そのあと直す PR を作る
+
+          手元の Claude Code にこの Issue と結果の URL を渡してよい。
+          EOF
+          gh issue create --title "kit-e2e が main で落ちました（$(TZ=Asia/Tokyo date +%F)）" --label kit-e2e --body-file body.md

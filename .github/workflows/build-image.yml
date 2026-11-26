@@ -64,6 +64,7 @@ on:
     paths:
       - "docker/php/**"
       - ".github/workflows/build-image.yml"
+      - ".github/build-matrix.json"
   workflow_dispatch:
     inputs:
       series:
@@ -103,7 +104,7 @@ jobs:
   # 4.3 の既定は 8.3（8.2 は 2026-12-31 でセキュリティサポートが切れるため。v1.0.13 から）。
   # **既定を動かすと、短いタグ（4.3）を追っている本番の PHP が次の焼き直しで変わる。**
   # phpredis は EC-CUBE 側の Symfony Cache と両立しないバージョンがあり、間違えると
-  # 起動時に落ちる（docker/php/Dockerfile のコメント参照）。**bin/lib/image.sh の
+  # 起動時に落ちる（docker/php/Dockerfile のコメント参照）。一覧は .github/build-matrix.json。**bin/lib/image.sh の
   # image_php_for_series / image_phpredis_for_series と揃えること。**
   # `default: true` の 1 つに `-php` 無しの短いタグを打つ。
   setup:
@@ -134,6 +135,11 @@ jobs:
           echo "refresh=$refresh" >> "$GITHUB_OUTPUT"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
           echo "ref=$ref refresh=$refresh"
+      # 一覧（.github/build-matrix.json）を読むためだけの checkout。定期と手動は main、タグはそのタグのもの
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/build-matrix.json
+          sparse-checkout-cone-mode: false
       - id: build
         run: |
           # **4.4 は `4.4.x-dev`。** Packagist に 4.4 のリリースはまだ 1 つも無く、
@@ -142,19 +148,12 @@ jobs:
           # `dev-4.4` も不可で、通るのは `4.4.x-dev` の形。
           #
           # **これは動く的なので、焼くたびに中身が変わる。** 4.4 が正式に出たら
-          # `~4.4.0` へ変えること。それまで 4.4 のイメージは「その時点の
+          # `~4.4.0` へ変えること（upstream-watch が正式版を見つけたら PR を作る）。それまで 4.4 のイメージは「その時点の
           # ブランチの写し」であって、再現しない。
-          all='[
-            {"series":"4.2","eccube":"~4.2.0",  "php":"8.1","phpredis":"6.0.2","default":false},
-            {"series":"4.2","eccube":"~4.2.0",  "php":"8.2","phpredis":"6.0.2","default":true},
-            {"series":"4.3","eccube":"~4.3.0",  "php":"8.1","phpredis":"6.0.2","default":false},
-            {"series":"4.3","eccube":"~4.3.0",  "php":"8.2","phpredis":"6.0.2","default":false},
-            {"series":"4.3","eccube":"~4.3.0",  "php":"8.3","phpredis":"6.0.2","default":true},
-            {"series":"4.4","eccube":"4.4.x-dev","php":"8.2","phpredis":"6.3.0","default":false},
-            {"series":"4.4","eccube":"4.4.x-dev","php":"8.3","phpredis":"6.3.0","default":true},
-            {"series":"4.4","eccube":"4.4.x-dev","php":"8.4","phpredis":"6.3.0","default":false},
-            {"series":"4.4","eccube":"4.4.x-dev","php":"8.5","phpredis":"6.3.0","default":false}
-          ]'
+          # 一覧は .github/build-matrix.json（このワークフローの外に置くのは、upstream-watch が正式版の PR を
+          # GITHUB_TOKEN で作れるようにするため。ワークフローのファイルはそのトークンでは書き換えられない）。
+          # 1 行 1 組の形を崩さない（kit-e2e.sh と upstream_watch.py が行で読む）
+          all="$(jq -c . .github/build-matrix.json)"
           want='${{ github.event.inputs.series }}'
           if [ -n "$want" ]; then
             matrix="$(printf '%s' "$all" | jq -c --arg s "$want" '[.[] | select(.series == $s)]')"
@@ -185,7 +184,7 @@ jobs:
             # 見るので、同じコミットに打った 1 つ前のタグ（リリース直後の再タグ）を飛ばしてしまう
             prev="$(git tag --merged "${GITHUB_REF_NAME}" --sort=-creatordate | grep -vx "${GITHUB_REF_NAME}" | head -1 || true)"
             if [ -n "$prev" ]; then
-              changed="$(git diff --name-only "$prev" "$GITHUB_REF_NAME" -- docker/php .github/workflows/build-image.yml | wc -l)"
+              changed="$(git diff --name-only "$prev" "$GITHUB_REF_NAME" -- docker/php .github/workflows/build-image.yml .github/build-matrix.json | wc -l)"
               if [ "$changed" = 0 ]; then
                 mode=retag
                 # 名前を足す元（追跡タグ）が全部あることを確かめる。無ければ焼く

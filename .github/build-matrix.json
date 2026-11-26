@@ -1,0 +1,11 @@
+[
+  {"series":"4.2","eccube":"~4.2.0","php":"8.1","phpredis":"6.0.2","default":false},
+  {"series":"4.2","eccube":"~4.2.0","php":"8.2","phpredis":"6.0.2","default":true},
+  {"series":"4.3","eccube":"~4.3.0","php":"8.1","phpredis":"6.0.2","default":false},
+  {"series":"4.3","eccube":"~4.3.0","php":"8.2","phpredis":"6.0.2","default":false},
+  {"series":"4.3","eccube":"~4.3.0","php":"8.3","phpredis":"6.0.2","default":true},
+  {"series":"4.4","eccube":"4.4.x-dev","php":"8.2","phpredis":"6.3.0","default":false},
+  {"series":"4.4","eccube":"4.4.x-dev","php":"8.3","phpredis":"6.3.0","default":true},
+  {"series":"4.4","eccube":"4.4.x-dev","php":"8.4","phpredis":"6.3.0","default":false},
+  {"series":"4.4","eccube":"4.4.x-dev","php":"8.5","phpredis":"6.3.0","default":false}
+]

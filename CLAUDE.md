@@ -426,10 +426,16 @@ DoctrineMigrations / config / Plugin）と `html/user_data`（独自 CSS/JS）�
 
 - **キット自体は `kit-e2e.yml` で、系列（4.2・4.3・4.4）× DB（MariaDB・PostgreSQL）の 6 組を通して試す**
   （`.github/scripts/kit-e2e.sh`。init → ページ → `security.sh check` → backup → DB を変えて restore → 同じ系列で upgrade →
-  ページ → doctor）。キットの動きに関わるファイルを変える PR と、毎週月曜（全部を焼き直した朝のあと）に流れる。**自動で
+  ページ → doctor）。キットの動きに関わるファイルを変える PR と、build-image が焼き終わるたび（`workflow_run`。毎日の焼き直し・月曜の全部・リリース）に流れ、main で落ちたらラベル `kit-e2e` の Issue が開く。**自動で
   取り込む（自動マージする）ための土台**で、ここが通らない変更は通さない。手元で流すときは使い捨ての worktree の中で
   （`.env` があると止まる）。最初に流して、`doctor` が管理画面を `/admin/login` と決め打ちし、`init.sh` で作った店（`admin-<乱数>`）の
   全部で「404 ← 異常」を出していたのが見つかった。
+- **上流の新しい版は `upstream-watch.yml` が毎日見る**（`.github/scripts/upstream_watch.py`。docs/security-updates.md「上流の新しい版」）。
+  配っている系列のパッチ版 → その系列を当日焼き直す。開発版で配っている系列の正式版 → 一覧を `~<系列>.0` にする PR を作り、
+  そのブランチに kit-e2e を流す（GITHUB_TOKEN の PR には pull_request が走らない）。新しい系列・新しい PHP・系列が許す PHP の変化 →
+  Issue。**焼く組の一覧は `.github/build-matrix.json`**（GITHUB_TOKEN は `.github/workflows/` を push できないので外に出した。
+  build-image と kit-e2e.sh が読む）。`bin/lib/image.sh` と揃っているかは kit-e2e の最初のステップが見る。**店の EC-CUBE と PHP は
+  勝手に上げない**（本体はボリュームの中で upgrade.sh だけが変える。PHP の変化は drift guard が止める）。マージとリリースは人。
 - **テストは `bin/test.sh` から実行する**。素の `vendor/bin/phpunit` だとコンテナの
   `APP_ENV=prod` が勝って prod カーネルが起動し、`WebTestCase` 系が
   「framework.test config is not set to true」で全部落ちる（`bin/test.sh` が
