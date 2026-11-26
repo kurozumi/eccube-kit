@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>開発から本番へ | EC-CUBE 運用キット</title>
+<meta name="description" content="開発環境（パソコン）と本番環境（サーバー）の作り方と、直したものを安全に本番へ出す手順。初めての人向けに、どこで何を打つかを順番に。">
+<meta property="og:title" content="EC-CUBE 運用キット — 開発から本番へ">
+<meta property="og:description" content="開発環境（パソコン）と本番環境（サーバー）の作り方と、直したものを安全に本番へ出す手順。初めての人向けに、どこで何を打つかを順番に。">
+<meta property="og:type" content="website">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#E8621C">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@500;700;900&family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topnav"><div class="wrap"><a class="brand" href="./"><img src="favicon.svg" alt="">EC-CUBE 運用キット</a><nav aria-label="ページ"><a href="./">トップ</a><a href="guide.html">はじめる・上げる</a><a href="flow.html" aria-current="page">開発から本番へ</a><a href="ops.html">更新と反映</a><a href="server.html">本番サーバー</a><a href="scale.html">大規模アクセス</a><a href="https://github.com/kurozumi/eccube-kit">GitHub</a></nav></div></div>
+
+<header class="pagehead">
+  <div class="wrap">
+    <p class="eyebrow">eccube-kit · __TAG__</p>
+    <h1>開発から本番へ</h1>
+    <p class="lede">パソコンで直して試し、GitHub に控えを置き、サーバーへ出す。お店に関わる場所は 3 つで、出し方は毎回同じです。このページでは、パソコンの中の開発環境と本番環境の作り方、直したものを安全に本番へ出す手順を、初めての人向けに順番に書きます。</p>
+  </div>
+</header>
+
+<section id="places">
+  <div class="wrap">
+    <h2>お店に関わる<em class="k">3 つの場所</em></h2>
+    <p class="sub">決まりは 1 つだけです。<strong>直すのはパソコン、動かすのはサーバー。</strong>サーバーの上では直しません。パソコンで直したものを GitHub に控え、そこからサーバーへ送ります。</p>
+
+    <ol class="layers">
+      <li class="layer">
+        <div class="lname"><span class="lstep">1</span>開発環境<small>あなたのパソコン</small></div>
+        <ul>
+          <li><strong>直して、試す場所。</strong>お店がまるごとパソコンの中で動きます（<code>http://localhost:8080/</code>）。</li>
+          <li>壊しても誰にも迷惑がかかりません。お客さんは見ていません。</li>
+          <li>メールは外へ出ず、パソコンの中の受け箱（Mailpit）に届きます。試しに注文しても、誰にもメールは届きません。</li>
+        </ul>
+      </li>
+      <li class="layer">
+        <div class="lname"><span class="lstep">2</span>あなたのリポジトリ<small>GitHub（非公開）</small></div>
+        <ul>
+          <li><strong>直したものの控え。</strong>いつ・誰が・何を直したかが残り、いつでも前の状態に戻せます。</li>
+          <li>本番に出せるのは、ここの <code>main</code> に入ったものだけです。</li>
+        </ul>
+      </li>
+      <li class="layer">
+        <div class="lname"><span class="lstep">3</span>本番環境<small>借りたサーバー</small></div>
+        <ul>
+          <li><strong>お客さんが買い物をする場所。</strong>ここでは直しません。<code>bin/deploy.sh</code> で送られてきたものを動かすだけです。</li>
+          <li>サーバーに git も GitHub の鍵も置きません。お店のファイルは、あなたのパソコンから送ります。</li>
+        </ul>
+      </li>
+    </ol>
+
+    <div class="note">
+      <b>ステージング（本番そっくりの確認用の環境）は？</b>
+      <span>小さなお店・中くらいのお店なら、いつも置いておく必要はありません。パソコンの開発環境も本番と同じモードで動くので、パソコンで動けば本番でもたいてい同じように動きます。<strong>EC-CUBE そのものを上げるときだけは</strong>、パソコンの別のフォルダに確認用を作り、本番のバックアップを戻して試してから本番で上げます（<a href="guide.html#flow-eccube">EC-CUBE のバージョンアップ</a>）。終わったら消してかまいません。</span>
+    </div>
+  </div>
+</section>
+
+<section id="dev">
+  <div class="wrap">
+    <h2>開発環境を<em class="k">作る</em></h2>
+    <p class="sub">最初に 1 回だけです。終わると、パソコンのブラウザでお店と管理画面が開きます。</p>
+
+    <div class="terms">
+      <div class="term"><p class="tag">パソコン</p><h3>Mac か Windows</h3><p>Mac は最初から入っている「ターミナル」を使います。Windows は <strong>WSL2（Ubuntu）</strong>を入れ、その中で打ちます。コマンドは bash 用で、PowerShell では動きません。</p></div>
+      <div class="term"><p class="tag">お店を動かす台</p><h3>Docker Desktop</h3><p>公式サイトから入れて、起動しておきます。お店は、この中の箱（コンテナ）で動きます。</p></div>
+      <div class="term"><p class="tag">控えの置き場</p><h3>GitHub のアカウントと <code>gh</code></h3><p>GitHub のアカウントを作り、<strong>二段階認証を有効に</strong>します。<code>gh</code> は GitHub をコマンドで扱う道具です（Mac なら <code>brew install gh</code>）。</p></div>
+    </div>
+
+    <div class="flow">
+      <div class="flow-head">
+        <span class="letter">A</span>
+        <h3>パソコンでお店を動かす</h3>
+        <p>上から順に打ちます。<code>myshop</code> は好きな名前に変えてかまいません。</p>
+        <p>時間: 10 分ほど（動かすところは数十秒）。</p>
+        <div class="keep"><b>git clone はしません。</b>キットを clone すると、控えの送り先がキットの配布元のままになります。中身だけをもらって、<b>あなた専用の非公開リポジトリ</b>にします。</div>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where pc">パソコン</span>GitHub にログインする</h4>
+<pre>gh auth login</pre>
+<p>質問に答えると、ブラウザで GitHub のログイン画面が開きます。1 回だけです。</p></li>
+        <li><h4><span class="where pc">パソコン</span>キットの中身をもらう</h4>
+<pre>curl -fsSL https://github.com/kurozumi/eccube-kit/releases/latest/download/eccube-docker.tar.gz | tar -xz
+mv eccube-docker-* myshop &amp;&amp; cd myshop</pre>
+<p>いつも最新のリリースが落ちてきます。</p></li>
+        <li><h4><span class="where pc">パソコン</span>あなたの非公開リポジトリにする</h4>
+<pre>git init -b main &amp;&amp; git add -A &amp;&amp; git commit -m "eccube-kit から開始"
+gh repo create myshop --private --source=. --push</pre>
+<p><strong><code>--private</code> を必ず付けます。</strong>これが「あなたのリポジトリ」です。</p></li>
+        <li><h4><span class="where pc">パソコン</span>お店を動かす</h4>
+<pre>bin/init.sh --image=ghcr.io/kurozumi/eccube-kit/ec-cube:4.3-php8.3</pre>
+<p>パスワード類を作り、空いているポートを選び、お店を起動して、終わるまで待ちます。<code>4.3</code> が EC-CUBE の版、<code>php8.3</code> が PHP の版です。<strong>最後にお店の URL・管理画面の URL・ログイン ID・パスワードが出る</strong>ので、控えておきます。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>開いてみる</h4>
+          <div class="tablewrap">
+            <table class="stack">
+              <tr><th>開くもの</th><th>URL</th><th>使いみち</th></tr>
+              <tr><td><strong>お店</strong></td><td data-label="URL"><code>http://localhost:8080/</code></td><td data-label="使いみち">お客さんから見える画面</td></tr>
+              <tr><td><strong>管理画面</strong></td><td data-label="URL"><code>http://localhost:8080/admin-&lt;乱数&gt;/</code></td><td data-label="使いみち">手順 4 で出た URL。商品や注文を扱う</td></tr>
+              <tr><td><strong>メールの受け箱</strong></td><td data-label="URL"><code>http://localhost:8025/</code></td><td data-label="使いみち">お店が送ったメールがここに届く（外へは出ない）</td></tr>
+              <tr><td><strong>DB の画面</strong></td><td data-label="URL"><code>http://localhost:8081/</code></td><td data-label="使いみち">データベースの中身を見る（開発環境にだけある）</td></tr>
+            </table>
+          </div>
+<p>ほかのソフトが番号を使っていたときは、<code>bin/init.sh</code> が空いている番号を選び、実際の URL を表示します。</p></li>
+      </ol>
+    </div>
+
+    <div class="flow">
+      <div class="flow-head">
+        <span class="letter">A2</span>
+        <h3>2 台目のパソコン・2 人目の人</h3>
+        <p>もうリポジトリがあるなら、キットの中身はもらいません。<strong>あなたのリポジトリ</strong>を clone します。</p>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where pc">パソコン</span>あなたのリポジトリを取ってきて動かす</h4>
+<pre>gh repo clone myshop &amp;&amp; cd myshop
+bin/init.sh --image=ghcr.io/kurozumi/eccube-kit/ec-cube:4.3-php8.3</pre>
+<p><code>--image=</code> は<strong>本番と同じもの</strong>にします（本番の <code>.env</code> の <code>ECCUBE_IMAGE</code>）。<code>.env</code> は git に入らないので、パソコンごとに新しく作られます。お店の中身は最初の空の状態で、本番のお客さんや注文は入っていません。</p></li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section id="prod">
+  <div class="wrap">
+    <h2>本番環境を<em class="k">作る</em></h2>
+    <p class="sub">サーバーを借りて、SSH で入れるようにしたら、あとは<strong>パソコンから</strong>コマンドを順に打つだけです。サーバーに入って作業することはほとんどありません。</p>
+
+    <div class="flow">
+      <div class="flow-head">
+        <span class="letter">B</span>
+        <h3>サーバーにお店を載せる</h3>
+        <p>時間: サーバーを借りるところを除いて 30 分ほど。</p>
+        <div class="keep"><b>サーバーに git は置きません。</b>お店のファイルはパソコンから送ります。サーバーに GitHub の鍵を置かずに済みます。</div>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where eye">ブラウザ</span>サーバーを借りて、守りを固める</h4>
+<p>VPS・AWS・Google Cloud のどれでもかまいません。借り方、SSH の鍵、ファイアウォールは <a href="server.html">本番サーバーを用意する</a> に、画面の操作から書いてあります。終わると、パソコンから <code>ssh shop</code> でサーバーに入れるようになります（<code>shop</code> は <code>~/.ssh/config</code> に書いたサーバーの呼び名）。</p></li>
+        <li><h4><span class="where srv">サーバー</span>Docker を入れて、お店のファイルを送る（パソコンから打つ）</h4>
+<pre>bin/bootstrap-server.sh shop /srv/myshop</pre></li>
+        <li><h4><span class="where srv">サーバー</span>メールと公開の設定（パソコンから打つ）</h4>
+<pre>bin/setup.sh mail   --remote=shop:/srv/myshop
+bin/setup.sh tunnel --remote=shop:/srv/myshop</pre>
+<p>質問に答えるだけです。メールは 1 通試してから、公開は Cloudflare に繋がるか試してから書きます。</p></li>
+        <li><h4><span class="where srv">サーバー</span>公開する（パソコンから打つ）</h4>
+<pre>bin/publish.sh --remote=shop:/srv/myshop</pre></li>
+        <li><h4><span class="where srv">サーバー</span>毎日のバックアップを入れる（パソコンから打つ）</h4>
+<pre>bin/setup.sh backup --remote=shop:/srv/myshop</pre>
+<p>暗号化して、サーバーの外へ毎日送ります。<strong>表示された暗号化の鍵と、サーバーの <code>.env</code> の中身をパスワードマネージャに控えます。</strong>失くすと二度と戻りません。</p></li>
+      </ol>
+    </div>
+    <p class="sub" style="margin-top:20px">それぞれの手順の細かいところと、公開の前に確かめることは <a href="server.html#common">本番サーバーを用意する</a> にあります。</p>
+  </div>
+</section>
+
+<section id="release">
+  <div class="wrap">
+    <h2>直したものを<em class="k">本番へ出す</em></h2>
+    <p class="sub">毎回この 6 つの順番です。どれも、あなたのパソコンで打ちます。慣れたら 1 と 2 を繰り返し、まとまったら 3 から先へ進みます。</p>
+
+    <div class="flow">
+      <div class="flow-head">
+        <span class="letter">C</span>
+        <h3>いつもの出し方</h3>
+        <p>時間: 出すところ（5）は数分。お客さんには、そのあいだ「メンテナンス中」が出ます。</p>
+        <div class="keep"><b>お客さんの少ない時間に出します。</b>メンテナンス表示が出るあいだは注文ができません。ログイン中の管理者は、そのあいだも管理画面に入れます。</div>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where pc">パソコン</span>直す</h4>
+          <div class="tablewrap">
+            <table class="stack">
+              <tr><th>直したいもの</th><th>触る場所</th></tr>
+              <tr><td>見た目（CSS）</td><td data-label="触る場所"><code>frontend/scss/customize.scss</code> を直して <code>bin/assets.sh build</code></td></tr>
+              <tr><td>画面の部品（テンプレート）</td><td data-label="触る場所"><code>app/template/original/</code> に、<strong>直すファイルだけ</strong>を置く</td></tr>
+              <tr><td>プラグインの画面・メールの文面</td><td data-label="触る場所"><code>bin/plugin.sh template add &lt;プラグイン&gt; &lt;ファイル&gt;</code> で写してから直す</td></tr>
+              <tr><td>動き（PHP）</td><td data-label="触る場所"><code>app/Customize/</code></td></tr>
+            </table>
+          </div>
+<p>EC-CUBE そのもののファイルは直しません。上げたときに消えるか、古いほうが残り続けるからです。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>パソコンで確かめる</h4>
+<p><code>http://localhost:8080/</code> を開いて、直したところと、その周りを触ってみます。メールが関わるなら、メールの受け箱（<code>http://localhost:8025/</code>）で届いた文面を見ます。直したのに変わらないときは <code>bin/plugin.sh reload</code>。</p></li>
+        <li><h4><span class="where pc">パソコン</span>控えを送る</h4>
+<pre>git add -A
+git commit -m "何を直したか"
+git push</pre>
+<p><code>-m</code> のあとには、あとで読んで分かる言葉を書きます（「送料無料の金額を 5,000 円に」など）。本番に出すときに、この一覧が出ます。</p></li>
+        <li><h4><span class="where pc">パソコン</span>何が出るかを見る</h4>
+<pre>bin/deploy.sh --check --remote=shop:/srv/myshop</pre>
+<p><strong>まだ何も変えません。</strong>出るコミットの一覧と、気をつけるもの（データベースの形が変わる、など）が出ます。思っていたものと違えば、ここで止めます。</p></li>
+        <li><h4><span class="where srv">サーバー</span>出す（パソコンから打つ）</h4>
+<pre>bin/deploy.sh --remote=shop:/srv/myshop</pre>
+<p>もう一度一覧が出て、<strong>プロジェクト名を打つように言われます。</strong><code>y</code> では進みません。打つ前なら、何も変わっていません。打つと、次のことを順に自動でやります。</p>
+<p>いまの状態を退避 → メンテナンス表示 → ファイルを送る → データベースを新しい形に → キャッシュを組み立て直す → 画面が開くかを確かめる → メンテナンス表示を外す</p>
+<p><strong>途中で止めないでください</strong>（Ctrl-C を押さない、ターミナルを閉じない）。キャッシュの組み立ての途中で止めると、全部のページがエラーになります。</p></li>
+        <li><h4><span class="where eye">ブラウザ</span>本番を目で確かめる</h4>
+<p>トップ・商品のページ・カートに入れる・管理画面にログイン・受注一覧。直したところも開きます。</p></li>
+      </ol>
+    </div>
+
+    <div class="note">
+      <b>プラグインは別の扱い</b>
+      <span>プラグインは、既定では git に入りません（買ったものはそれぞれの提供元のもの、という考え）。なので <code>bin/deploy.sh</code> では本番に届きません。どう届けるか（本番にも入れる・git に入れて一緒に管理する）は、最初に決めておきます（<a href="https://github.com/kurozumi/eccube-kit/blob/main/docs/install.md">導入手順</a>）。パソコンで入れるのは <code>bin/plugin.sh add &lt;URL&gt;</code> です。</span>
+    </div>
+  </div>
+</section>
+
+<section id="guard">
+  <div class="wrap">
+    <h2>うっかりは<em class="k">キットが止める</em></h2>
+    <p class="sub">本番に出す前に、<code>bin/deploy.sh</code> が次のことを確かめます。どれかに当たると<strong>何も送らずに止まり</strong>、何が悪いかを日本語で出します。</p>
+
+    <div class="tablewrap">
+      <table class="stack">
+        <tr><th>うっかり</th><th>キットがすること</th></tr>
+        <tr><td>コミットしていない作りかけの変更がある</td><td data-label="キットがすること">送らない。作りかけが本番に出ない</td></tr>
+        <tr><td>試しに作った別のブランチにいる</td><td data-label="キットがすること">送らない。本番に出せるのは <code>main</code> だけ</td></tr>
+        <tr><td><code>git push</code> を忘れた／パソコンの <code>main</code> が古い</td><td data-label="キットがすること">送らない。GitHub の <code>main</code> の先頭と<strong>まったく同じもの</strong>しか出せない</td></tr>
+        <tr><td>何が出るか見ないまま出そうとした</td><td data-label="キットがすること">一覧を見せて、プロジェクト名を打つまで進まない。誰が・いつ・何を出したかをサーバーに記録する</td></tr>
+        <tr><td>出している途中で失敗した</td><td data-label="キットがすること">メンテナンス表示のまま止まり、壊れた画面をお客さんに見せない。戻し方を表示する</td></tr>
+        <tr><td>管理画面で直したものがある（下）</td><td data-label="キットがすること">出す前の退避に入れて、パソコンへ取り込むように知らせる</td></tr>
+      </table>
+    </div>
+
+    <div class="note">
+      <b>何人かで運用するなら</b>
+      <span>直す人と出す人を分け、GitHub で「承認が無いと <code>main</code> に入らない」ようにできます（<code>bin/setup.sh protect</code>）。本番の SSH は出す人だけが持ちます。詳しくは <a href="ops.html#gate">本番には、レビュー済みの main しか出ない</a>。</span>
+    </div>
+  </div>
+</section>
+
+<section id="admin">
+  <div class="wrap">
+    <h2>管理画面で直したものは<em class="k">サーバーにしか無い</em></h2>
+    <p class="sub">管理画面の「CSS 管理」「ページ管理」「ブロック管理」「メール設定」の本文は、<strong>本番サーバーのファイルに書かれます。</strong>あなたのパソコンにも GitHub にも、自動では入りません。毎日のバックアップには入るので消えはしませんが、控えに残すには取り込みます。</p>
+
+    <div class="flow">
+      <div class="flow-head">
+        <span class="letter">D</span>
+        <h3>本番の管理画面で直した分を、控えに入れる</h3>
+        <p><code>bin/deploy.sh</code> が「コミットされていない変更」があると知らせたら、次に出す前にこれをやります。</p>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where pc">パソコン</span>サーバーから取り込んで、控えを送る</h4>
+<pre>bin/pull-admin-files.sh shop:/srv/myshop
+git add app/template html/user_data
+git commit -m "管理画面で直した分を取り込む" &amp;&amp; git push</pre>
+<p>見た目やテンプレートを直すのは、なるべくパソコンのほう（<a href="#release">直したものを本番へ出す</a>）に寄せます。管理画面とパソコンの両方で同じものを直すと、どちらが正しいか分からなくなります。</p></li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section id="undo">
+  <div class="wrap">
+    <h2>出したあとで<em class="k">おかしい</em>と気づいたら</h2>
+    <p class="sub">慌てて本番のファイルを直接書き換えないでください。次の順に試します。</p>
+
+    <div class="flow">
+      <div class="flow-head">
+        <span class="letter">E</span>
+        <h3>上から順に試す</h3>
+        <p>1 で直ればそこで終わりです。直らなければ 2、データベースまで戻すのは 3 です。</p>
+        <div class="keep"><b>出す直前の状態は、いつも取ってあります。</b><code>bin/deploy.sh</code> は始める前に、サーバーの <code>backups/&lt;日時&gt;-before-deploy/</code> へ退避しています。</div>
+      </div>
+      <ol class="steps-v">
+        <li><h4><span class="where srv">サーバー</span>まず点検する</h4>
+<pre>ssh shop
+cd /srv/myshop
+bin/plugin.sh doctor</pre>
+<p>残骸の掃除、キャッシュの組み立て直し、主なページが開くかの確認までやります。何が悪いかが日本語で出るので、そのとおりにします。「メンテナンス中」のまま残ったときも、これで外れます。</p></li>
+        <li><h4><span class="where pc">パソコン</span>直したものを取り消して、出し直す</h4>
+<pre>git revert --no-edit HEAD
+git push
+bin/deploy.sh --remote=shop:/srv/myshop</pre>
+<p>直前のコミットを打ち消すコミットを作り、いつもどおり出します。履歴は消えず、「取り消した」ことも残ります。GitHub の PR でマージしたものなら、PR の画面の「Revert」ボタンで取り消しの PR を作り、マージしてから出し直しても同じです。</p></li>
+        <li><h4><span class="where srv">サーバー</span>データベースも戻す</h4>
+<pre>ssh shop
+cd /srv/myshop
+bin/restore.sh backups/&lt;日時&gt;-before-deploy</pre>
+<p>データベースの形を変える変更を出したあとだけです。出す直前に取った退避から戻します。<strong>退避のあとに入った注文や、管理画面で変えたものは消えます。</strong>戻す前に、受注一覧でその時刻からの注文を確かめてください。</p></li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section id="dont">
+  <div class="wrap">
+    <h2>本番で<em class="k">やらない</em>こと</h2>
+    <div class="two faq">
+      <div class="box no"><h4>サーバーの上で直す</h4><ul>
+        <li>サーバーのファイルを直接書き換えると、控えに残りません。次に出したときに、パソコンの中身で上書きされるか、出せなくなります。</li>
+        <li>直すのはいつもパソコンで、出すのはいつも <code>bin/deploy.sh</code> です。</li>
+      </ul></div>
+      <div class="box no"><h4>消えるコマンドを打つ</h4><ul>
+        <li><code>bin/reset.sh</code>・<code>bin/switch-version.sh</code>・<code>docker compose down -v</code> は、データベースと画像を消します。本番では打ちません。</li>
+        <li>本番で打とうとすると止まるようになっていますが、止まるのを当てにしないでください。</li>
+      </ul></div>
+      <div class="box no"><h4>途中で止める</h4><ul>
+        <li><code>bin/deploy.sh</code> や <code>bin/upgrade.sh</code> の途中で Ctrl-C を押したり、ターミナルを閉じたりしない。</li>
+        <li>動いていないように見えても、キャッシュを組み立てているあいだは数分かかります。</li>
+      </ul></div>
+      <div class="box no"><h4>本番の SSH をみんなに渡す</h4><ul>
+        <li>本番の SSH を持つ人は、キットの確かめを通らずにファイルを置けます。</li>
+        <li>持つのは出す人だけにします。</li>
+      </ul></div>
+    </div>
+
+    <div class="note">
+      <b>正直に</b>
+      <span>キットが止められるのは「うっかり」までです。止まる仕組みは、パソコンとサーバーのあいだ（<code>bin/deploy.sh</code>）に入っています。サーバーに SSH で入って直接ファイルを置くことは止められません。また、EC-CUBE そのものを上げるのは <code>bin/deploy.sh</code> ではなく <code>bin/upgrade.sh</code> です（<a href="guide.html#flow-eccube">EC-CUBE のバージョンアップ</a>）。</span>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <h2>ほかのページ</h2>
+    <div class="nextpages"><a class="nextpage" href="server.html"><span class="tag">本番サーバー</span><h3>本番サーバーを<em class="k">用意する</em></h3><p>AWS・Google Cloud・VPS の借り方、SSH とファイアウォールの守り方、公開の前に確かめること。</p></a><a class="nextpage" href="guide.html"><span class="tag">はじめる・上げる</span><h3>やりたいことから<em class="k">選ぶ</em></h3><p>EC-CUBE のバージョンアップと環境のアップデートを、どこで何を打つかの流れ図で。</p></a><a class="nextpage" href="ops.html"><span class="tag">更新と反映</span><h3>パッチを<em class="k">その日のうちに</em></h3><p>失敗したら元に戻る仕組みと、本番にはレビュー済みの main しか出ない 3 枚の壁。</p></a></div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>Apache License 2.0（<code>app/</code> の下は EC-CUBE に合わせて GPL-2.0-or-later）。EC-CUBE は対象外で、EC-CUBE 自身のライセンスがそのまま適用されます（EC-CUBE は一切改変していません）。</p>
+    <p><a href="https://github.com/kurozumi/eccube-kit/releases">リリース</a> · <a href="https://github.com/kurozumi/eccube-kit/issues">Issue</a> · <a href="https://github.com/kurozumi/eccube-kit/blob/main/LICENSE">LICENSE</a> · <a href="https://github.com/kurozumi/eccube-kit/security/policy">脆弱性の報告（非公開）</a></p>
+    <p>作った人: Akira Kurozumi（<a href="https://a-zumi.net/">a-zumi.net</a>）· <a href="./#contact">お問い合わせ</a></p>
+    <p>この環境は非公式です。EC-CUBE は株式会社イーシーキューブの登録商標で、同社とは無関係です。</p>
+  </div>
+</footer>
+
+<div class="fab" id="fab" hidden>
+  <div class="fab-menu" id="fab-menu" role="dialog" aria-label="お問い合わせ / Issue">
+    <div class="head">困ったこと、こう動いてほしい<small>どちらも歓迎です。うまく書けなくて構いません。</small></div>
+    <a class="fab-item" href="https://github.com/kurozumi/eccube-kit/issues/new" target="_blank" rel="noopener">
+      <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg></span>
+      <span><b>Issue を書く</b><span>不具合・要望・質問。GitHub で公開の相談</span></span>
+    </a>
+    <a class="fab-item" href="mailto:info@a-zumi.net?subject=eccube-kit%20%E3%81%AE%E7%9B%B8%E8%AB%87">
+      <span class="ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></span>
+      <span><b>メールで相談する</b><span>公開できない話、受託の構築・引っ越し</span></span>
+    </a>
+  </div>
+  <button class="fab-btn" id="fab-btn" type="button" aria-expanded="false" aria-controls="fab-menu">
+    <svg class="chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H8l-5 3 1.2-4.2A8 8 0 1 1 21 12z"/></svg>
+    <svg class="x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    <span>お問い合わせ / Issue</span>
+  </button>
+</div>
+<script>
+(function () {
+  var fab = document.getElementById('fab');
+  var btn = document.getElementById('fab-btn');
+  var contact = document.getElementById('contact');
+  if (!fab || !btn) return;
+  fab.hidden = false;
+  var menu = document.getElementById('fab-menu');
+  // 閉じている間はメニューの中に Tab で入れないようにする（見えないリンクにフォーカスが行かない）
+  if (menu) menu.inert = true;
+  function setOpen(v) {
+    if (!v && menu && menu.contains(document.activeElement)) btn.focus();
+    fab.classList.toggle('open', v);
+    btn.setAttribute('aria-expanded', v ? 'true' : 'false');
+    if (menu) menu.inert = !v;
+  }
+  btn.addEventListener('click', function () { setOpen(!fab.classList.contains('open')); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') setOpen(false); });
+  document.addEventListener('click', function (e) { if (!fab.contains(e.target)) setOpen(false); });
+  // 連絡先の節が見えている間は出さない（同じものが二重に見えないように）
+  if (contact && 'IntersectionObserver' in window) {
+    new IntersectionObserver(function (es) {
+      var seen = es[0].isIntersecting;
+      fab.hidden = seen;
+      if (seen) setOpen(false);
+    }, { threshold: 0.15 }).observe(contact);
+  }
+})();
+</script>
+</body>
+</html>
