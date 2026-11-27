@@ -57,6 +57,13 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
             || die "向こうに出した版 ${b} が手元にありません。git fetch origin（浅い clone なら git fetch --unshallow）のあとで打ち直してください"
     done
 fi
+# 取り込む前から手元にあった未追跡のファイル（取り込みで生えたものと分けるため）
+nl='
+'
+pre_untracked=""
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    pre_untracked="$(git ls-files --others --exclude-standard -- app/template html/user_data 2>/dev/null || true)"
+fi
 # tar で 1 本にして流す。ファイル単位の scp は遅く、途中で切れたときに半端が残る。
 ssh "$host" "cd '${path}' && tar -czf - app/template html/user_data" | tar -xzf -
 
@@ -75,9 +82,30 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
             fi
         done
     done < <(git diff --name-only -z -- app/template html/user_data 2>/dev/null || true)
+    # 手元で消して commit したファイルは、向こうにはまだ残っているので、取り込むと未追跡で生き返る。前に出した版の
+    # ままなら消し直す（向こうで直されていたら残す）。取り込む前からあった未追跡のファイルには触らない
+    removed=""
+    while IFS= read -r -d '' f; do
+        [ -n "$f" ] || continue
+        case "${nl}${pre_untracked}${nl}" in *"${nl}${f}${nl}"*) continue ;; esac
+        now="$(git hash-object -- "$f" 2>/dev/null || true)"
+        for b in $bases; do
+            if [ -n "$now" ] && [ "$(git rev-parse -q --verify "${b}:${f}" 2>/dev/null || true)" = "$now" ]; then
+                rm -f -- "$f"
+                removed="${removed}${f}
+"
+                break
+            fi
+        done
+    done < <(git ls-files -z --others --exclude-standard -- app/template html/user_data 2>/dev/null || true)
     if [ -n "$kept" ]; then
         log "手元のほうが新しいので取り込まなかったもの（向こうはまだ前に出した版のまま。次の deploy で届きます）:"
         printf '%s' "$kept" | sed 's/^/    /'
+    fi
+    if [ -n "$removed" ]; then
+        log "手元で消したので取り込まなかったもの（向こうには前に出した版が残っています。手元から送る deploy は"
+        log "  向こうのファイルを消さないので、要らなければ向こうで消してください）:"
+        printf '%s' "$removed" | sed 's/^/    /'
     fi
     if [ -z "$bases" ] && [ -n "$(git diff --name-only -- app/template html/user_data 2>/dev/null || true)" ]; then
         log "注意: 向こうに出した版の記録が無いので、手元で直してまだ出していないものも、向こうの古い版で上書きしています。"
