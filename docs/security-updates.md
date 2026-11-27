@@ -147,7 +147,8 @@ Trivy が見るのはイメージの中のパッケージで、**EC-CUBE 本体�
 ## 上流の新しい版（upstream-watch.yml）
 
 EC-CUBE と PHP の新しい版に、キットを追いつかせる。毎日、`.github/build-matrix.json`（焼く組の一覧）と上流
-（Packagist・EC-CUBE/ec-cube のブランチと各系列の `composer.json`・endoflife.date の PHP）を比べる。
+（Packagist・EC-CUBE/ec-cube のブランチと各系列の `composer.json`・README の対応一覧・CI の matrix・endoflife.date の PHP・
+PECL の phpredis）を比べる。
 
 | 出たもの | 自動でやること | 人がやること |
 |---|---|---|
@@ -156,10 +157,17 @@ EC-CUBE と PHP の新しい版に、キットを追いつかせる。毎日、`
 | プレリリース（4.4.0-RC1） | 知らせるだけ | なし |
 | 新しい系列（4.5） | Issue に手順を並べる | 移植（PHP・phpredis・一覧・`image.sh`・プラグイン全数・文書） |
 | 系列が許す PHP の変化・新しい PHP（8.6） | Issue で知らせる | 配るかを決める。**既定の PHP は動かさない**（短いタグの店の PHP が変わる） |
+| 上流が README・CI に載せた PHP（キットがその系列で配る最新より新しいもの） | Issue で知らせる | 同上。phpredis が組めるかと、公式の `php:<版>-fpm-bookworm` で Dockerfile が通るかを手元で焼いて確かめる |
+| phpredis の正式版（キットが使っているより新しいもの） | Issue で知らせる | 配っている PHP の全部で組めるかを確かめ、上げるなら一覧と `image_phpredis_for_series` を揃える |
 
 **店の EC-CUBE と PHP は勝手に上がらない。** 焼き直したイメージに新しいパッチが入っても、店の本体（`eccube_app`
 ボリューム）は店の人が `bin/upgrade.sh` を打つまでそのまま。PHP のマイナー版が変わるイメージは、deploy / publish が
 引いたところで止める（`image_php_drift_guard`）。系列をまたぐ upgrade は点検と `--rehearsed` が要る。
+
+**composer.json の制約だけでは、上流が新しい PHP に対応した日が分からない。** 4.4 は `^8.2` で、8.6 が出た日から許している。
+上流が実際に対応したと分かるのは README の対応一覧と CI に載った日なので、そちらも見る。PHP 8.6 は出た日（2026-11）の
+時点で上流の README・CI に無く、phpredis 6.3.0 は 8.6 で組めず（6.4.0RC1 なら組める）、公式の `php:8.6-fpm` は pecl を持たず
+fpm が ZTS だった（Dockerfile の `pecl install redis` がそのまま落ちる）。
 
 - 前回の状態は、ラベル `upstream-watch` のいちばん新しい Issue の本文に隠して持つ。読めなかった元は引き継ぎ、
   ラベル `upstream-watch-error` の Issue を 1 つだけ開く

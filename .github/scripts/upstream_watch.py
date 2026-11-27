@@ -13,6 +13,11 @@
                                      移植は人（プラグイン全数・PHP・phpredis）。手順を Issue に並べる。
   5. 系列が許す PHP が変わった    … 上流の各系列のブランチの composer.json の require.php。
   6. 新しい PHP（8.6）            … endoflife.date に、キットのどの系列も配っていない新しい PHP が出た。
+  7. 上流が対応する PHP           … 上流の各系列の README の対応一覧か CI（unit-test.yml の matrix）に、キットがその系列で
+                                     配っているいちばん新しい PHP より新しい版が載った。composer.json の制約（5）は
+                                     広い（4.4 は `^8.2`）ので、上流が実際に足した日はここでしか分からない。
+  8. phpredis の正式版            … PECL に、キットが使っているより新しい phpredis の正式版（stable）が出た。
+                                     新しい PHP は phpredis が組めないと焼けない（6.3.0 は PHP 8.6 で組めない）。
 
 使い方: upstream_watch.py <.github/build-matrix.json> <前回の状態.json（無ければ空）> <出力先>
   出力: report.md / state.json / actions.json（{"build": [系列…], "stable_pr": [{"series", "latest"}…]}）
@@ -20,7 +25,7 @@
 
 **読めなかった元は「消えた」「変わった」と取り違えない。** 前回の状態を引き継ぎ、errors=true にする。
 **初回は、履歴で決まるもの（1 と 3）を知らせない**（いまある全部を「新しい」と言わない）。
-2・4・5・6 は「いまの状態」で決まるので、初回でも知らせる（知らせたものは state に入り、二度は言わない）。
+2・4・5・6・7・8 は「いまの状態」で決まるので、初回でも知らせる（知らせたものは state に入り、二度は言わない）。
 """
 import json
 import os
@@ -33,6 +38,7 @@ GH_API = "https://api.github.com"
 PACKAGIST = "https://repo.packagist.org/p2/ec-cube/ec-cube.json"
 EOL_PHP = "https://endoflife.date/api/php.json"
 RAW = "https://raw.githubusercontent.com/EC-CUBE/ec-cube"
+PECL_REDIS = "https://pecl.php.net/rest/r/redis/allreleases.xml"
 
 
 def get(url):
@@ -57,9 +63,33 @@ def kit_matrix(path):
         raise RuntimeError("build-matrix.json を読めませんでした（形が変わった？）")
     kit = {}
     for r in rows:
-        k = kit.setdefault(r["series"], {"eccube": r["eccube"], "php": []})
+        k = kit.setdefault(r["series"], {"eccube": r["eccube"], "php": [], "phpredis": []})
         k["php"].append(r["php"])
+        if r.get("phpredis") and r["phpredis"] not in k["phpredis"]:
+            k["phpredis"].append(r["phpredis"])
     return kit
+
+
+def readme_php(text):
+    """上流の README の対応一覧（`* PHP 8.2.x / 8.3.x`）から PHP の版を取る。見つからなければ例外（書き方が変わった）"""
+    m = re.search(r"^\*\s*PHP\s+(.+)$", text, re.M)
+    if not m:
+        raise RuntimeError("「* PHP …」の行が見つからない（書き方が変わった？）")
+    vs = sorted(set(re.findall(r"\d+\.\d+", m.group(1))), key=vt)
+    if not vs:
+        raise RuntimeError(f"PHP の版が読めない: {m.group(0)!r}")
+    return vs
+
+
+def ci_php(text):
+    """上流の unit-test.yml の matrix（`php: [ '8.2', '8.3' ]`）から PHP の版を取る。見つからなければ例外"""
+    m = re.search(r"^\s+php:\s*\[([^\]]*)\]", text, re.M)
+    if not m:
+        raise RuntimeError("matrix の「php: [ … ]」が見つからない（書き方が変わった？）")
+    vs = sorted(set(re.findall(r"\d+\.\d+", m.group(1))), key=vt)
+    if not vs:
+        raise RuntimeError(f"PHP の版が読めない: {m.group(0).strip()!r}")
+    return vs
 
 
 def is_stable(series, v):
@@ -161,6 +191,44 @@ def main():
             events.append(("phpreq", f"EC-CUBE {s} が許す PHP が変わりました: `{prev[key]}` → `{req}`"
                                      f"（キットが配っている PHP: {' / '.join(kit[s]['php'])}）。"))
 
+    # ---- 上流が対応する PHP（7）。キットがその系列で配っているいちばん新しい PHP より新しいものだけ
+    #      （4.2 の README は 7.4〜8.1 だが、キットは 8.1 / 8.2 を配る。古いほうは知らせない）
+    for s in sorted(kit, key=vt):
+        top = max(kit[s]["php"], key=vt)
+        found = {}
+        for label, url, parse in (("README の対応一覧", f"{RAW}/{s}/README.md", readme_php),
+                                  ("CI（unit-test.yml）", f"{RAW}/{s}/.github/workflows/unit-test.yml", ci_php)):
+            try:
+                for v in parse(get(url)):
+                    if vt(v) > vt(top):
+                        found.setdefault(v, []).append(label)
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"- {s} ブランチの{label}: {e}")
+                carry(f"upphp:{s}:")
+        for v, where in sorted(found.items(), key=lambda x: vt(x[0])):
+            key = f"upphp:{s}:{v}"
+            state[key] = 1
+            if key not in prev:
+                events.append(("upphp", f"EC-CUBE {s} の上流が **PHP {v}** を{'・'.join(where)}に載せました"
+                                        f"（キットが {s} で配っている PHP: {' / '.join(kit[s]['php'])}）。"))
+
+    # ---- phpredis の正式版（8）
+    kit_redis = sorted({r for k in kit.values() for r in k["phpredis"]}, key=vt)
+    try:
+        rels = re.findall(r"<r>\s*<v>([^<]+)</v>\s*<s>([^<]+)</s>", get(PECL_REDIS))
+        if not rels:
+            raise RuntimeError("版が 1 つも無い（形が変わった？）")
+        for v, stability in rels:
+            if stability.strip() == "stable" and re.fullmatch(r"\d+\.\d+\.\d+", v) and kit_redis and vt(v) > vt(kit_redis[-1]):
+                key = f"phpredis:{v}"
+                state[key] = 1
+                if key not in prev:
+                    uses = ", ".join(f"{s}: {' / '.join(k['phpredis'])}" for s, k in sorted(kit.items(), key=lambda x: vt(x[0])))
+                    events.append(("phpredis", f"**phpredis {v}**（正式版）が出ました。キットが使っている版は {uses} です。"))
+    except Exception as e:  # noqa: BLE001
+        errors.append(f"- PECL（redis）: {e}")
+        carry("phpredis:")
+
     # ---- 新しい PHP（6）
     try:
         cycles = [c["cycle"] for c in json.loads(get(EOL_PHP)) if re.fullmatch(r"\d+\.\d+", str(c.get("cycle", "")))]
@@ -197,12 +265,21 @@ def main():
                   "6. 文書・サイトの対応表を直す",
         "phpreq": "- 新しく許された PHP は、`.github/build-matrix.json` と `image_php_versions_for_series` に足すか決める。\n"
                   "- 外された PHP は、その系列で配るのを止めるか決める（止めるなら、使っている店への案内が先）。",
+        "upphp": "- その系列で配るかを決める。配るなら、その PHP で phpredis が組めるか（下の「phpredis の正式版」）と、公式の\n"
+                 "  `php:<版>-fpm-bookworm` で Dockerfile が通るかを手元で焼いて確かめる（PHP 8.6 の公式イメージは pecl が無く、fpm が ZTS）。\n"
+                 "- 足すのは `.github/build-matrix.json`・`image_php_versions_for_series`・`image_php_eol`（保守期限）。"
+                 "**既定（`default: true`）は動かさない。**",
+        "phpredis": "- その系列で配っている PHP の全部で組めるかを確かめ、上げるなら `.github/build-matrix.json` の `phpredis` と"
+                    " `image_phpredis_for_series` を揃える。\n"
+                    "- 新しい PHP を phpredis 待ちで配れずにいたなら、それを足す PR と一緒にしてよい。",
         "php": "- 系列ごとに、上流の composer.json がその版を許しているか・上流の CI で試されているかを見る。\n"
+               "  上流が README か CI に載せたら、ここからまた知らせます（「上流が対応する PHP」）。\n"
                "- 配るなら `.github/build-matrix.json`・`image_php_versions_for_series`・`image_php_eol`（保守期限）を足す。"
                "**既定（`default: true`）は動かさない**（短いタグの店の PHP が変わる。いまは deploy が止めるが、知らせが要る）。",
     }
     titles = {"patch": "パッチ版", "pre": "プレリリース", "stable": "正式版", "series": "新しい系列",
-              "phpreq": "系列が許す PHP", "php": "新しい PHP"}
+              "phpreq": "系列が許す PHP", "php": "新しい PHP", "upphp": "上流が対応する PHP",
+              "phpredis": "phpredis の正式版"}
     with open(os.path.join(out, "report.md"), "w", encoding="utf-8") as f:
         if events:
             f.write("上流（EC-CUBE・PHP）に、キットが追いつくべきものが出ました。\n\n")

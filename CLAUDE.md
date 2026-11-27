@@ -436,8 +436,9 @@ DoctrineMigrations / config / Plugin）と `html/user_data`（独自 CSS/JS）�
   全部で「404 ← 異常」を出していたのが見つかった。
 - **上流の新しい版は `upstream-watch.yml` が毎日見る**（`.github/scripts/upstream_watch.py`。docs/security-updates.md「上流の新しい版」）。
   配っている系列のパッチ版 → その系列を当日焼き直す。開発版で配っている系列の正式版 → 一覧を `~<系列>.0` にする PR を作り、
-  そのブランチに kit-e2e を流す（GITHUB_TOKEN の PR には pull_request が走らない）。新しい系列・新しい PHP・系列が許す PHP の変化 →
-  Issue。**焼く組の一覧は `.github/build-matrix.json`**（GITHUB_TOKEN は `.github/workflows/` を push できないので外に出した。
+  そのブランチに kit-e2e を流す（GITHUB_TOKEN の PR には pull_request が走らない）。新しい系列・新しい PHP・系列が許す PHP の変化・上流が README か CI に
+  載せた PHP・phpredis の正式版 → Issue（composer.json の制約は広く、4.4 の `^8.2` は 8.6 を出た日から許すので、上流が対応した日は
+  README と CI でしか分からない）。**焼く組の一覧は `.github/build-matrix.json`**（GITHUB_TOKEN は `.github/workflows/` を push できないので外に出した。
   build-image と kit-e2e.sh が読む）。`bin/lib/image.sh` と揃っているかは kit-e2e の最初のステップが見る。**店の EC-CUBE と PHP は
   勝手に上げない**（本体はボリュームの中で upgrade.sh だけが変える。PHP の変化は drift guard が止める）。マージとリリースは人。
 - **テストは `bin/test.sh` から実行する**。素の `vendor/bin/phpunit` だとコンテナの
