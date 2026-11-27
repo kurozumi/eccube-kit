@@ -58,12 +58,18 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     done
 fi
 # 取り込む前から手元にあった未追跡のファイル（取り込みで生えたものと分けるため）
-nl='
-'
-pre_untracked=""
+# 名前は NUL 区切りで配列に読む（-z が無いと git は " などを含む名前を引用符付きで出し、突き合わせを外す）
+pre_untracked=()
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    pre_untracked="$(git ls-files --others --exclude-standard -- app/template html/user_data 2>/dev/null || true)"
+    while IFS= read -r -d '' f; do
+        pre_untracked+=("$f")
+    done < <(git ls-files -z --others --exclude-standard -- app/template html/user_data 2>/dev/null || true)
 fi
+was_untracked() {
+    local p
+    for p in ${pre_untracked[@]+"${pre_untracked[@]}"}; do [ "$p" = "$1" ] && return 0; done
+    return 1
+}
 # tar で 1 本にして流す。ファイル単位の scp は遅く、途中で切れたときに半端が残る。
 ssh "$host" "cd '${path}' && tar -czf - app/template html/user_data" | tar -xzf -
 
@@ -87,7 +93,7 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     removed=""
     while IFS= read -r -d '' f; do
         [ -n "$f" ] || continue
-        case "${nl}${pre_untracked}${nl}" in *"${nl}${f}${nl}"*) continue ;; esac
+        was_untracked "$f" && continue
         now="$(git hash-object -- "$f" 2>/dev/null || true)"
         for b in $bases; do
             if [ -n "$now" ] && [ "$(git rev-parse -q --verify "${b}:${f}" 2>/dev/null || true)" = "$now" ]; then
