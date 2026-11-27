@@ -48,13 +48,22 @@ log "${host} の ${path} から app/template と html/user_data を取り込み�
 # 手元へ戻す。** 手元で直してまだ出していないファイルは、向こうでは古い版のまま。それを取り込むと手元の直しが
 # 消え、言われたとおり commit すると取り消しになる（deploy.sh が止まったときの案内どおりに打つと、そうなっていた）
 sent="$(ssh "$host" "cat '${path}/var/deploy.log' 2>/dev/null" 2>/dev/null | deploy_sent_shas || true)"
+bases="$(printf '%s\n' "$sent" | sed '/^$/d')"
+# 記録にある版が手元に無い（浅い clone・まだ fetch していない）と、取り込んだあとに見分けられず、手元の直しを
+# 黙って上書きしたままになる。**取り込む前に止める。**
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    for b in $bases; do
+        git cat-file -e "${b}^{commit}" 2>/dev/null \
+            || die "向こうに出した版 ${b} が手元にありません。git fetch origin（浅い clone なら git fetch --unshallow）のあとで打ち直してください"
+    done
+fi
 # tar で 1 本にして流す。ファイル単位の scp は遅く、途中で切れたときに半端が残る。
 ssh "$host" "cd '${path}' && tar -czf - app/template html/user_data" | tar -xzf -
 
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     kept=""
-    bases="$(printf '%s\n' "$sent" | sed '/^$/d')"
-    while IFS= read -r f; do
+    # 名前は NUL 区切りで読む（git は日本語などの名前を引用符付きで出し、そのままでは見つからない）
+    while IFS= read -r -d '' f; do
         [ -n "$f" ] || continue
         now="$(git hash-object -- "$f" 2>/dev/null || true)"
         for b in $bases; do
@@ -65,9 +74,7 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
                 break
             fi
         done
-    done <<EOF_CHANGED
-$(git diff --name-only -- app/template html/user_data 2>/dev/null || true)
-EOF_CHANGED
+    done < <(git diff --name-only -z -- app/template html/user_data 2>/dev/null || true)
     if [ -n "$kept" ]; then
         log "手元のほうが新しいので取り込まなかったもの（向こうはまだ前に出した版のまま。次の deploy で届きます）:"
         printf '%s' "$kept" | sed 's/^/    /'

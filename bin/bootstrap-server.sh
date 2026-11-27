@@ -40,19 +40,24 @@ ssh "$host" "mkdir -p '${path}'" 2>/dev/null || ssh "$host" "sudo mkdir -p '${pa
 # 控えの置き場は向こうで mktemp -d で作る（同じ秒に 2 回打っても、前の控えを潰さない）
 bdir="$(ssh "$host" "cd '${path}' && mkdir -p var/bootstrap-backup && mktemp -d \"var/bootstrap-backup/\$(date +%Y%m%d-%H%M%S)-XXXXXX\"")" \
     || die "向こうに控えの置き場を作れません（${path}/var/bootstrap-backup）"
+# 送る前の版とコミットしていない変更の有無を控える（送っている間に別の端末で commit されると、送った中身と
+# 送ったあとの HEAD が食い違う。そのまま記録すると、比べ先が送った中身と違ってしまう）
+head_before="$(git rev-parse HEAD)"
+dirty_before="$(git status --porcelain --untracked-files=no 2>/dev/null)"
 git ls-files -z | rsync -az --from0 --files-from=- --backup --backup-dir="$bdir" ./ "${host}:${path}/" || die "送れませんでした"
 # **送った版を向こうの記録（var/deploy.log）に残す。** deploy.sh はこれを「出した版」として、管理画面で直したファイルを
 # 見分ける。記録が無いと、最初の deploy で手元で直しただけのファイルまで「管理画面で直した」と挙げて止まり、案内どおり
 # 取り込むと手元の直しが消えていた（検証の環境で踏んだ）。コミットしていない変更も送ったときは記録しない（送った中身が
 # どの版とも違うので、比べ先にできない。最初の deploy は手元と違うものを全部挙げる）
-if [ -z "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+if [ -z "$dirty_before" ] && [ -z "$(git status --porcelain --untracked-files=no 2>/dev/null)" ] \
+    && [ "$(git rev-parse HEAD)" = "$head_before" ]; then
     # shellcheck source=bin/lib/deploy-guard.sh
     . bin/lib/deploy-guard.sh
-    rec="$(printf '%s\t%s\t%s\t%s\t%s' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(git rev-parse HEAD)" push "$(deploy_whoami)" "done bootstrap")"
+    rec="$(printf '%s\t%s\t%s\t%s\t%s' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$head_before" push "$(deploy_whoami)" "done bootstrap")"
     ssh "$host" "cd '${path}' && mkdir -p var && printf '%s\n' '${rec}' >> var/deploy.log" \
         || log "注意: 送った版を向こうの記録に残せませんでした。最初の deploy は、手元と違うファイルを全部挙げて止まります"
 else
-    log "注意: コミットしていない変更も送ったので、送った版を記録しません。最初の deploy は、手元と違うファイルを全部挙げて止まります"
+    log "注意: コミットしていない変更も送ったか、送っている間に版が変わったので、送った版を記録しません。最初の deploy は、手元と違うファイルを全部挙げて止まります"
 fi
 if [ -n "$(ssh "$host" "cd '${path}' && find '${bdir}' -type f | head -1" 2>/dev/null)" ]; then
     log "向こうで上書きしたファイルは ${path}/${bdir}/ に控えました"
