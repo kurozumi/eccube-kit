@@ -231,7 +231,7 @@ DoctrineMigrations / config / Plugin）と `html/user_data`（独自 CSS/JS）�
 - **本番には `main` の先頭と同じものしか出ない。** `bin/deploy.sh` は向こうが本番構成なら、
   手元がブランチ違い・未コミット・未 push のどれかで**送らない**（`bin/lib/deploy-guard.sh`）。
   **手元から送る（push モード）ときは、サーバーの管理画面が直したファイルを上書きするなら止まる**（最後に成功した sha と、そのあと始めた
-  deploy の sha の全部と比べる。失敗した deploy もファイルは入れ替えている。`deploy_admin_conflicts`。サーバーに git が無いので pull モードの知らせは出ない）。お店のファイルは `var/deploy-incoming/<日時>/` へ
+  deploy の sha の全部と比べる。失敗した deploy もファイルは入れ替えている。`bootstrap-server.sh` も送った版を `done bootstrap` で残す。`deploy_admin_conflicts`。`pull-admin-files.sh` は向こうが出した版のままのファイルを取り込まない（手元で直してまだ出していないものを古い版で上書きし、案内どおり commit すると取り消しになっていた）。サーバーに git が無いので pull モードの知らせは出ない）。お店のファイルは `var/deploy-incoming/<日時>/` へ
   送って、向こうがメンテナンス表示と退避のあとで入れ替える（`bin/` と `docker/php/` だけ先。古い deploy.sh は置き場を知らず、`--rebuild` の build は入れ替えの前）。v1.0.25 までは
   直接送っていたので、管理画面の直しが黙って消え、退避も「送ったあと」だった。
   出る前に要約を見せて**プロジェクト名を打たせる**（`y` では通さない）。非対話は
